@@ -1,0 +1,72 @@
+[package]
+name = "cryptr"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70.0"
+license = "Apache-2.0"
+authors = ["Sebastian Dobe <sebastiandobe@mailbox.org"]
+categories = ["command-line-utilities", "cryptography", "data-structures"]
+keywords = ["cli", "cryptography", "encryption", "utility", "security"]
+description = "simple encrypted (streaming) values"
+readme = "README.md"
+repository = "https://github.com/sebadob/cryptr"
+
+[features]
+default = []
+cli = ["s3", "streaming", "dep:clap", "dep:colored", "dep:home", "dep:rpassword"]
+s3 = ["streaming", "dep:reqwest", "dep:rusty-s3", "dep:tokio-util"]
+streaming = ["dep:reqwest"]
+# this feature is not working properly yet
+#no-std = []
+
+[dependencies]
+anyhow = "1.0.75"
+async-stream = "0.3.5"
+async-trait = "0.1.74"
+base64 = "0.21.5"
+bincode = "1.3.3"
+bytes = "1.5.0"
+dotenvy = "0.15.7"
+flume = "0.11.0"
+futures = "0.3.29"
+serde = { version = "1.0.193", features = ["derive"] }
+tokio = { version = "1.35.0", features = ["fs", "io-std", "macros", "rt-multi-thread"]}
+tracing = { version = "0.1.40", features = ["attributes"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "tracing"] }
+rand = { version = "0.8.5", features = [] }
+regex = "1.10.2"
+
+# cli
+clap = { version = "4.4.10", optional = true, features = ["derive"] }
+colored = { version = "2.0.4", optional = true }
+home = { version = "0.5.5", optional = true }
+rpassword = { version = "7.3.1", optional = true }
+
+# s3
+reqwest = { version = "0.11.22", optional = true, default-features = false, features = [
+    "json", "rustls-tls", "stream"
+] }
+rusty-s3 = { version= "0.5.0", optional = true }
+tokio-util = { version = "0.7.10", optional = true, features = ["full"] }
+
+# std
+#[target.'cfg(not(feature = "no-std"))'.dependencies]
+argon2 = { version = "0.5.2", features = ["std", "zeroize"] }
+chacha20poly1305 = { version = "0.10.1", features = ["std", "stream"] }
+url = "2.5.0"
+
+# std features disabled
+#[target.'cfg(feature = "no-std")'.dependencies]
+#chacha20poly1305 = { version = "0.10.1", default-features = false, features = [
+#    "alloc", "getrandom", "heapless", "rand_core", "stream"
+#] }
+#argon2 = { version = "0.5.2", features = [] }
+
+# fix minimal versions
+# sharded-slab
+lazy_static = "1.1.0"
+
+[dev-dependencies]
+cryptr = { path = ".", features = ["cli"] }
+rstest = "0.18.2"
+tokio-test = "0.4.3"

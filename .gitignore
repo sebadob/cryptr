@@ -1,0 +1,6 @@
+.idea
+target
+/test_files/*
+/Cargo.lock
+/.env
+/.idea
