@@ -11,6 +11,9 @@ description = "simple encrypted (streaming) values"
 readme = "README.md"
 repository = "https://github.com/sebadob/cryptr"
 
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
 default = []
 cli = ["s3", "streaming", "dep:clap", "dep:colored", "dep:home", "dep:rpassword"]
