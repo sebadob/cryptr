@@ -80,4 +80,5 @@ cargo install cryptr --features cli
 
 ## Examples
 
-You can find usage examples for both the library and the CLI in the `examples/` folder.
+You can find usage examples for both the library and the CLI in the
+[examples](https://github.com/sebadob/cryptr/tree/main/examples) folder.
