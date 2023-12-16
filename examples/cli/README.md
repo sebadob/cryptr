@@ -1,19 +1,14 @@
 # CLI usage example
 
 This should give a short intro to the CLI usage.  
-Since the project is in an early phase, there are no pre-packaged binaries yet.  
-We will use an ALIAS in this example, but as soon as it has been published to crates.io, you can do a `cargo install`,
-which I will update then.
 
-Set ourselves an alias, until the point, where we can just install cryptr. You should be in this project's 
-root directory for this to work properly:
+Install the CLI via cargo
 
 ```
-alias cryptr="cargo run -q --features cli -- "
+cargo install cryptr --features cli
 ```
 
-Check that it is working. The very first execution might take a while. It will compile the project and we
-have set the output to quiet `-q` in the alias.
+Check that it is working.
 
 ```
 cryptr -h

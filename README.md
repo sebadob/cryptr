@@ -70,6 +70,14 @@ The CLI can handle most cases already and even provides a nice UX with importing
 CLI instead of manually updating the config file. You can do in-memory as well as streaming operations
 via CLI, even to S3 storage already.
 
+#### Install CLI
+
+You can install the CLI via `cargo` for now:
+
+```
+cargo install cryptr --features cli
+```
+
 ## Examples
 
 You can find usage examples for both the library and the CLI in the `examples/` folder.
