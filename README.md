@@ -74,7 +74,7 @@ via CLI, even to S3 storage already.
 
 You can install the CLI via `cargo` for now:
 
-```
+```notest
 cargo install cryptr --features cli
 ```
 
