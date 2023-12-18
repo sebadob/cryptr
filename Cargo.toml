@@ -1,6 +1,6 @@
 [package]
 name = "cryptr"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.70.0"
 license = "Apache-2.0"
@@ -19,8 +19,6 @@ default = []
 cli = ["s3", "streaming", "dep:clap", "dep:colored", "dep:home", "dep:rpassword"]
 s3 = ["streaming", "dep:reqwest", "dep:rusty-s3", "dep:tokio-util"]
 streaming = ["dep:reqwest"]
-# this feature is not working properly yet
-#no-std = []
 
 [dependencies]
 anyhow = "1.0.75"
@@ -57,13 +55,6 @@ tokio-util = { version = "0.7.10", optional = true, features = ["full"] }
 argon2 = { version = "0.5.2", features = ["std", "zeroize"] }
 chacha20poly1305 = { version = "0.10.1", features = ["std", "stream"] }
 url = "2.5.0"
-
-# std features disabled
-#[target.'cfg(feature = "no-std")'.dependencies]
-#chacha20poly1305 = { version = "0.10.1", default-features = false, features = [
-#    "alloc", "getrandom", "heapless", "rand_core", "stream"
-#] }
-#argon2 = { version = "0.5.2", features = [] }
 
 # fix minimal versions
 # sharded-slab
