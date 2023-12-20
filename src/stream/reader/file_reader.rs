@@ -16,6 +16,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio::{sync, time};
 use tracing::debug;
+use crate::CryptrError;
 
 /// Streaming FileReader
 ///
@@ -35,8 +36,8 @@ impl EncStreamReader for FileReader<'_> {
     async fn spawn_reader_encryption(
         self,
         chunk_size: ChunkSizeKb,
-        tx: Sender<anyhow::Result<(LastStreamElement, StreamChunk)>>,
-    ) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
+        tx: Sender<Result<(LastStreamElement, StreamChunk), CryptrError>>,
+    ) -> Result<JoinHandle<Result<(), CryptrError>>, CryptrError> {
         let mut f = File::open(&self.path).await.unwrap();
 
         let meta = f.metadata().await.expect("Reading file metadata");
@@ -91,8 +92,8 @@ impl EncStreamReader for FileReader<'_> {
     async fn spawn_reader_decryption(
         self,
         tx_init: oneshot::Sender<(EncValueHeader, Vec<u8>)>,
-        tx: Sender<anyhow::Result<(LastStreamElement, StreamChunk)>>,
-    ) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
+        tx: Sender<Result<(LastStreamElement, StreamChunk), CryptrError>>,
+    ) -> Result<JoinHandle<Result<(), CryptrError>>, CryptrError> {
         // we need to extract the header and the original nonce from the source file
         // the header should usually not be bigger than ~ 38 - 44 bytes
         // reading just the first 48 bytes should be safe enough
@@ -122,7 +123,7 @@ impl EncStreamReader for FileReader<'_> {
 
         let tx_progress = Self::spawn_progress(self.print_progress, self.path, filesize).await;
 
-        let handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+        let handle: JoinHandle<Result<(), CryptrError>> = tokio::spawn(async move {
             let mut buf = Vec::with_capacity(chunk_size as usize);
             (0..chunk_size).for_each(|_| buf.push(0));
 

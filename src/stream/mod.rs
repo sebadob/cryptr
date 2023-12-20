@@ -7,6 +7,7 @@ use tokio::task::JoinHandle;
 
 #[cfg(feature = "s3")]
 use std::time::Duration;
+use crate::CryptrError;
 
 pub mod reader;
 pub mod writer;
@@ -74,8 +75,8 @@ pub trait EncStreamReader {
     async fn spawn_reader_encryption(
         self,
         chunk_size: ChunkSizeKb,
-        tx: flume::Sender<anyhow::Result<(LastStreamElement, StreamChunk)>>,
-    ) -> anyhow::Result<JoinHandle<anyhow::Result<()>>>;
+        tx: flume::Sender<Result<(LastStreamElement, StreamChunk), CryptrError>>,
+    ) -> Result<JoinHandle<Result<(), CryptrError>>, CryptrError>;
 
     /// This must spawn the reader into the async context and then return.
     /// The reason is, that you are way more flexible optimizing with lifetimes and such.
@@ -87,8 +88,8 @@ pub trait EncStreamReader {
     async fn spawn_reader_decryption(
         self,
         tx_init: oneshot::Sender<(EncValueHeader, Vec<u8>)>,
-        tx: flume::Sender<anyhow::Result<(LastStreamElement, StreamChunk)>>,
-    ) -> anyhow::Result<JoinHandle<anyhow::Result<()>>>;
+        tx: flume::Sender<Result<(LastStreamElement, StreamChunk), CryptrError>>,
+    ) -> Result<JoinHandle<Result<(), CryptrError>>, CryptrError>;
 }
 
 #[async_trait]
@@ -98,8 +99,8 @@ pub trait EncStreamWriter {
 
     async fn write(
         &mut self,
-        rx: flume::Receiver<anyhow::Result<(LastStreamElement, StreamChunk)>>,
-    ) -> anyhow::Result<()>;
+        rx: flume::Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>,
+    ) -> Result<(), CryptrError>;
 }
 
 impl Debug for dyn EncStreamReader {

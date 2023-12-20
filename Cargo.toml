@@ -1,6 +1,6 @@
 [package]
 name = "cryptr"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.70.0"
 license = "Apache-2.0"
@@ -21,7 +21,6 @@ s3 = ["streaming", "dep:reqwest", "dep:rusty-s3", "dep:tokio-util"]
 streaming = ["dep:reqwest"]
 
 [dependencies]
-anyhow = "1.0.75"
 async-stream = "0.3.5"
 async-trait = "0.1.74"
 base64 = "0.21.5"
@@ -31,6 +30,7 @@ dotenvy = "0.15.7"
 flume = "0.11.0"
 futures = "0.3.29"
 serde = { version = "1.0.193", features = ["derive"] }
+thiserror = "1.0.51"
 tokio = { version = "1.35.0", features = ["fs", "io-std", "macros", "rt-multi-thread"]}
 tracing = { version = "0.1.40", features = ["attributes"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "tracing"] }

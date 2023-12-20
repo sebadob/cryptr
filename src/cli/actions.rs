@@ -1,11 +1,10 @@
-use crate::cli::args::{
-    ArgsEncryptDecrypt, ArgsKeysExport, ArgsKeysImport, ArgsKeysList, ArgsKeysNew, ArgsS3List,
-};
-use crate::cli::config::EncConfig;
-use crate::cli::utils;
-use crate::cli::utils::PromptPassword;
-use anyhow::Error;
+use std::time::Duration;
+
 use colored::Colorize;
+use reqwest::Url;
+use rusty_s3::actions::ListObjectsV2;
+use rusty_s3::S3Action;
+
 use cryptr::keys::{EncKeys, EncKeysSealed};
 use cryptr::stream::reader::file_reader::FileReader;
 use cryptr::stream::reader::memory_reader::MemoryReader;
@@ -18,10 +17,14 @@ use cryptr::stream::writer::StreamWriter;
 use cryptr::stream::{http_client, http_client_insecure};
 use cryptr::utils::{b64_decode, b64_encode};
 use cryptr::value::EncValue;
-use reqwest::Url;
-use rusty_s3::actions::ListObjectsV2;
-use rusty_s3::S3Action;
-use std::time::Duration;
+use cryptr::CryptrError;
+
+use crate::cli::args::{
+    ArgsEncryptDecrypt, ArgsKeysExport, ArgsKeysImport, ArgsKeysList, ArgsKeysNew, ArgsS3List,
+};
+use crate::cli::config::EncConfig;
+use crate::cli::utils;
+use crate::cli::utils::PromptPassword;
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Action {
@@ -30,7 +33,7 @@ pub(crate) enum Action {
 }
 
 #[allow(unused_assignments)]
-pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> anyhow::Result<()> {
+pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result<(), CryptrError> {
     let config = EncConfig::read().await?;
     config.enc_keys.init()?;
 
@@ -58,7 +61,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> anyhow
         Some(s) => {
             let (prefix, path) = match s.split_once(':') {
                 None => {
-                    return Err(Error::msg(ArgsEncryptDecrypt::from_to_fmt()));
+                    return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
                 }
                 Some(split) => split,
             };
@@ -71,7 +74,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> anyhow
             } else if prefix == "s3" {
                 let (bucket_name, object) = match path.split_once('/') {
                     None => {
-                        return Err(Error::msg(ArgsEncryptDecrypt::from_to_fmt()));
+                        return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
                     }
                     Some(split) => split,
                 };
@@ -87,7 +90,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> anyhow
                 })
             } else {
                 eprintln!("Unknown prefix format: {}", prefix);
-                return Err(Error::msg(ArgsEncryptDecrypt::from_to_fmt()));
+                return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
             }
         }
     };
@@ -105,7 +108,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> anyhow
         Some(s) => {
             let (prefix, path) = match s.split_once(':') {
                 None => {
-                    return Err(Error::msg(ArgsEncryptDecrypt::from_to_fmt()));
+                    return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
                 }
                 Some(split) => split,
             };
@@ -118,7 +121,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> anyhow
             } else if prefix == "s3" {
                 let (bucket_name, object) = match path.split_once('/') {
                     None => {
-                        return Err(Error::msg(ArgsEncryptDecrypt::from_to_fmt()));
+                        return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
                     }
                     Some(split) => split,
                 };
@@ -133,7 +136,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> anyhow
                 })
             } else {
                 eprintln!("Unknown prefix format: {}", prefix);
-                return Err(Error::msg(ArgsEncryptDecrypt::from_to_fmt()));
+                return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
             }
         }
     };
@@ -145,7 +148,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> anyhow
                 let password = prompt.prompt_validated("Provide a secure password").await?;
                 let confirm = prompt.prompt_validated("Confirm the password").await?;
                 if password != confirm {
-                    return Err(Error::msg("The passwords do not match"));
+                    return Err(CryptrError::Password("The passwords do not match"));
                 }
 
                 EncValue::encrypt_stream_with_password(reader, writer, &password).await?
@@ -158,14 +161,10 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> anyhow
             }
         }
     } else if let Some(id) = args.with_key_id {
-        match EncKeys::get_static_key(&id) {
-            Ok(_key) => match action {
-                Action::Encrypt => EncValue::encrypt_stream_with_key_id(reader, writer, id).await?,
-                Action::Decrypt => EncValue::decrypt_stream(reader, writer).await?,
-            },
-            Err(err) => {
-                return Err(Error::msg(err));
-            }
+        EncKeys::get_static_key(&id)?;
+        match action {
+            Action::Encrypt => EncValue::encrypt_stream_with_key_id(reader, writer, id).await?,
+            Action::Decrypt => EncValue::decrypt_stream(reader, writer).await?,
         };
     } else {
         match action {
@@ -190,7 +189,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> anyhow
     Ok(())
 }
 
-pub async fn convert_legacy_key() -> anyhow::Result<()> {
+pub async fn convert_legacy_key() -> Result<(), CryptrError> {
     println!("Insert a legacy ENC_KEYS string:");
     let input = utils::read_line_stdin().await?;
     let converted = EncKeys::try_convert_legacy_keys(&input)?;
@@ -205,7 +204,7 @@ pub async fn convert_legacy_key() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn new_random_key(args: ArgsKeysNew) -> anyhow::Result<()> {
+pub async fn new_random_key(args: ArgsKeysNew) -> Result<(), CryptrError> {
     println!("Generating a new random encryption key");
 
     let keys = match EncKeys::read_from_config() {
@@ -238,7 +237,7 @@ pub async fn new_random_key(args: ArgsKeysNew) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn list_keys(args: ArgsKeysList) -> anyhow::Result<()> {
+pub async fn list_keys(args: ArgsKeysList) -> Result<(), CryptrError> {
     let keys = if let Some(path) = &args.file {
         EncKeys::read_from_file(path)?
     } else {
@@ -264,7 +263,7 @@ pub async fn list_keys(args: ArgsKeysList) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn export_keys(args: ArgsKeysExport) -> anyhow::Result<()> {
+pub async fn export_keys(args: ArgsKeysExport) -> Result<(), CryptrError> {
     let config = EncConfig::read().await?;
     let mut keys = config.enc_keys;
 
@@ -370,7 +369,7 @@ pub async fn export_keys(args: ArgsKeysExport) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn import_keys(args: ArgsKeysImport) -> anyhow::Result<()> {
+pub async fn import_keys(args: ArgsKeysImport) -> Result<(), CryptrError> {
     let sealed = if let Some(file) = args.file {
         EncKeysSealed::read_from_file(&file).await?
     } else {
@@ -388,7 +387,7 @@ pub async fn import_keys(args: ArgsKeysImport) -> anyhow::Result<()> {
     let keys = match sealed.unseal(&password) {
         Ok(keys) => keys,
         Err(_) => {
-            return Err(Error::msg("Cannot decrypt the given keys"));
+            return Err(CryptrError::Decryption("Cannot decrypt the given keys"));
         }
     };
 
@@ -436,16 +435,16 @@ pub async fn import_keys(args: ArgsKeysImport) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn delete_key() -> anyhow::Result<()> {
+pub async fn delete_key() -> Result<(), CryptrError> {
     let mut config = match EncConfig::read().await {
         Ok(config) => config,
         Err(_) => {
-            return Err(Error::msg("No config found - nothing to delete"));
+            return Err(CryptrError::Config("No config found - nothing to delete"));
         }
     };
 
     if config.enc_keys.enc_keys.is_empty() {
-        return Err(Error::msg(
+        return Err(CryptrError::Config(
             "You have not encryption keys in your config - nothing to delete",
         ));
     }
@@ -461,7 +460,7 @@ pub async fn delete_key() -> anyhow::Result<()> {
     let trimmed = input.trim();
 
     if trimmed == config.enc_keys.enc_key_active {
-        return Err(Error::msg(
+        return Err(CryptrError::Keys(
             "You cannot delete the active key, change to another one first",
         ));
     }
@@ -476,7 +475,7 @@ pub async fn delete_key() -> anyhow::Result<()> {
         }
     });
     if !found_key {
-        return Err(Error::msg("The Key ID did not exist in your config"));
+        return Err(CryptrError::Keys("The Key ID did not exist in your config"));
     }
 
     config.save().await?;
@@ -485,7 +484,7 @@ pub async fn delete_key() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn set_active() -> anyhow::Result<()> {
+pub async fn set_active() -> Result<(), CryptrError> {
     let mut config = EncConfig::read().await?;
 
     list_keys(ArgsKeysList {
@@ -506,7 +505,7 @@ pub async fn set_active() -> anyhow::Result<()> {
         }
     }
     if !found_key {
-        return Err(Error::msg("The Key ID did not exist in your config"));
+        return Err(CryptrError::Keys("The Key ID did not exist in your config"));
     }
 
     config.enc_keys.enc_key_active = trimmed.to_string();
@@ -516,11 +515,11 @@ pub async fn set_active() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn s3_show() -> anyhow::Result<()> {
+pub async fn s3_show() -> Result<(), CryptrError> {
     let config = match EncConfig::read().await {
         Ok(config) => config,
         Err(_) => {
-            return Err(Error::msg("No config found"));
+            return Err(CryptrError::Keys("No config found"));
         }
     };
 
@@ -529,7 +528,7 @@ pub async fn s3_show() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn s3_update() -> anyhow::Result<()> {
+pub async fn s3_update() -> Result<(), CryptrError> {
     let mut config = EncConfig::read().await.unwrap_or_default();
 
     println!(
@@ -609,17 +608,17 @@ pub async fn s3_update() -> anyhow::Result<()> {
         config.save().await?;
         println!("Config has been saved successfully");
     } else {
-        return Err(Error::msg("Exited without saving"));
+        return Err(CryptrError::Cli("Exited without saving".to_string()));
     }
 
     Ok(())
 }
 
-pub async fn s3_list_buckets(args: ArgsS3List) -> anyhow::Result<()> {
+pub async fn s3_list_buckets(args: ArgsS3List) -> Result<(), CryptrError> {
     let config = match EncConfig::read().await {
         Ok(config) => config,
         Err(_) => {
-            return Err(Error::msg("No config found"));
+            return Err(CryptrError::Config("No config found"));
         }
     };
 
@@ -635,7 +634,8 @@ pub async fn s3_list_buckets(args: ArgsS3List) -> anyhow::Result<()> {
     let res = client.get(url).send().await?;
 
     let body = res.text().await?;
-    let parsed = ListObjectsV2::parse_response(&body)?;
+    let parsed =
+        ListObjectsV2::parse_response(&body).map_err(|err| CryptrError::S3(err.to_string()))?;
     println!("{:#?}", parsed);
 
     Ok(())

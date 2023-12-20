@@ -1,6 +1,7 @@
 use base64::{engine, engine::general_purpose, Engine as _};
 use rand::distributions::Alphanumeric;
 use rand::{Rng, RngCore};
+use crate::CryptrError;
 
 const B64_STD: engine::GeneralPurpose = general_purpose::STANDARD;
 
@@ -12,20 +13,20 @@ pub fn b64_encode(input: &[u8]) -> String {
 
 /// Base64 decode the given String
 #[inline]
-pub fn b64_decode(b64: &str) -> anyhow::Result<Vec<u8>> {
+pub fn b64_decode(b64: &str) -> Result<Vec<u8>, CryptrError> {
     Ok(B64_STD.decode(b64)?)
 }
 
 /// Fills the given buffer with random bytes
 #[inline]
-pub fn secure_random(buf: &mut [u8]) -> anyhow::Result<()> {
+pub fn secure_random(buf: &mut [u8]) -> Result<(), CryptrError> {
     rand::thread_rng().try_fill_bytes(buf)?;
     Ok(())
 }
 
 /// Returns a random `Vec<u8>` with the specified size
 #[inline]
-pub fn secure_random_vec(size: usize) -> anyhow::Result<Vec<u8>> {
+pub fn secure_random_vec(size: usize) -> Result<Vec<u8>, CryptrError> {
     let mut buf = Vec::with_capacity(size);
     (0..size).for_each(|_| buf.push(0));
     secure_random(&mut buf)?;

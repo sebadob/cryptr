@@ -1,7 +1,6 @@
 use crate::stream::{
     http_client, http_client_insecure, EncStreamWriter, LastStreamElement, StreamChunk,
 };
-use anyhow::{Context, Error};
 use async_trait::async_trait;
 use flume::Receiver;
 use reqwest::header::ETAG;
@@ -10,6 +9,7 @@ use std::mem;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
+use crate::CryptrError;
 use rusty_s3::actions::{
     AbortMultipartUpload, CompleteMultipartUpload, CreateMultipartUpload,
     CreateMultipartUploadResponse, PutObject, UploadPart,
@@ -46,8 +46,8 @@ impl EncStreamWriter for S3Writer<'_> {
 
     async fn write(
         &mut self,
-        rx: Receiver<anyhow::Result<(LastStreamElement, StreamChunk)>>,
-    ) -> anyhow::Result<()> {
+        rx: Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>,
+    ) -> Result<(), CryptrError> {
         let client = if self.danger_accept_invalid_certs {
             http_client_insecure()
         } else {
@@ -84,7 +84,8 @@ impl EncStreamWriter for S3Writer<'_> {
                     let resp = client.post(url).send().await?;
                     let body = resp.text().await?;
 
-                    let resp = CreateMultipartUpload::parse_response(&body)?;
+                    let resp = CreateMultipartUpload::parse_response(&body)
+                        .map_err(|err| CryptrError::S3(err.to_string()))?;
                     debug!(
                         "Multipart upload created with upload id {}",
                         resp.upload_id()
@@ -143,7 +144,7 @@ impl EncStreamWriter for S3Writer<'_> {
 
             if !resp.status().is_success() {
                 let body = resp.text().await?;
-                return Err(Error::msg(body));
+                return Err(CryptrError::S3(body));
             }
             let body = resp.text().await?;
 
@@ -163,7 +164,7 @@ impl S3Writer<'_> {
         part_number: u16,
         upload_id: &str,
         etags: &mut Vec<String>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         // TODO impl etag calc on our side too?
 
         let part_upload = UploadPart::new(
@@ -180,22 +181,29 @@ impl S3Writer<'_> {
                 if !resp.status().is_success() {
                     self.try_abort_upload(client, upload_id).await?;
                     let body = resp.text().await?;
-                    return Err(Error::msg(body));
+                    return Err(CryptrError::S3(body));
                 }
 
-                let etag = resp
-                    .headers()
-                    .get(ETAG)
-                    .context("expected an Etag from S3")?
-                    .to_str()
-                    .context("to received no corrupted Etag")?;
+                let etag = match resp.headers().get(ETAG) {
+                    None => {
+                        return Err(CryptrError::S3(
+                            "Did not receive an ETAG from S3 stroage".to_string(),
+                        ))
+                    }
+                    Some(value) => match value.to_str() {
+                        Ok(etag) => etag,
+                        Err(err) => {
+                            return Err(CryptrError::S3(err.to_string()));
+                        }
+                    },
+                };
 
                 debug!("etag for part {}: {}", part_number, etag);
                 etags.push(etag.to_string());
             }
             Err(err) => {
                 self.try_abort_upload(client, upload_id).await?;
-                return Err(Error::msg(err));
+                return Err(CryptrError::S3(err.to_string()));
             }
         }
 
@@ -206,7 +214,7 @@ impl S3Writer<'_> {
         &self,
         client: &reqwest::Client,
         upload_id: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         let action =
             AbortMultipartUpload::new(self.bucket, self.credentials, self.object, upload_id);
         let url = action.sign(SIGN_DUR);

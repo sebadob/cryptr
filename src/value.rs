@@ -1,8 +1,7 @@
-use crate::encryption;
 use crate::encryption::{ChunkSizeKb, MAC_SIZE_CHACHA_STREAM, NONCE_SIZE_CHACHA};
 use crate::kdf::KdfValue;
 use crate::keys::EncKeys;
-use anyhow::Error;
+use crate::{encryption, CryptrError};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::fmt::Debug;
 use tokio::fs;
@@ -24,13 +23,13 @@ pub enum EncAlg {
 }
 
 impl TryFrom<u8> for EncAlg {
-    type Error = Error;
+    type Error = CryptrError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         let slf = match value {
             1 => Self::ChaCha20Poly1305,
             _ => {
-                return Err(Error::msg(format!("Invalid EncFileAlg: {}", value)));
+                return Err(CryptrError::Deserialization("Invalid EncFileAlg"));
             }
         };
         Ok(slf)
@@ -72,13 +71,13 @@ pub enum EncVersion {
 }
 
 impl TryFrom<u8> for EncVersion {
-    type Error = Error;
+    type Error = CryptrError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         let slf = match value {
             1 => Self::V1,
             _ => {
-                return Err(Error::msg(format!("Invalid EncFileVersion: {}", value)));
+                return Err(CryptrError::Deserialization("Invalid EncFileVersion"));
             }
         };
         Ok(slf)
@@ -121,7 +120,7 @@ impl EncValueHeader {
     }
 
     /// Tries to extract the header information used for the encryption from the given byte slice.
-    pub(crate) fn try_extract(buf: &mut Bytes) -> anyhow::Result<Self> {
+    pub(crate) fn try_extract(buf: &mut Bytes) -> Result<Self, CryptrError> {
         let version = EncVersion::try_from(buf.get_u8())?;
         let alg = EncAlg::try_from(buf.get_u8())?;
         let length = buf.get_u16();
@@ -147,7 +146,7 @@ impl EncValueHeader {
     /// # Returns
     /// (EncValueHeader, Nonce, PayloadOffset)
     #[cfg(feature = "streaming")]
-    pub(crate) fn try_extract_with_nonce(buf: &[u8]) -> anyhow::Result<(Self, Vec<u8>, u16)> {
+    pub(crate) fn try_extract_with_nonce(buf: &[u8]) -> Result<(Self, Vec<u8>, u16), CryptrError> {
         let length_orig = buf.len();
 
         let mut buf = Bytes::from(buf.to_vec());
@@ -155,7 +154,9 @@ impl EncValueHeader {
         // lets make sure, that it was encrypted with streaming
         if header.chunk_size.value() == 0 {
             // TODO automatically switch to in-memory decryption here?
-            return Err(Error::msg("EncFile has not been encrypted with streaming"));
+            return Err(CryptrError::HeaderInvalid(
+                "EncFile has not been encrypted with streaming",
+            ));
         }
 
         let nonce_size = match &header.alg {
@@ -165,7 +166,9 @@ impl EncValueHeader {
         // chacha20 stream cipher nonce is 7 bytes
         let nonce = buf.split_to(nonce_size).to_vec();
         if nonce.len() != nonce_size {
-            return Err(Error::msg("Could not extract nonce - too short"));
+            return Err(CryptrError::HeaderInvalid(
+                "Could not extract nonce - too short",
+            ));
         }
 
         let offset = (length_orig - buf.len()) as u16;
@@ -199,10 +202,22 @@ pub struct EncValue {
     pub payload: Bytes,
 }
 
+impl TryFrom<Vec<u8>> for EncValue {
+    type Error = CryptrError;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        Self::try_from_bytes(value)
+    }
+}
+
 impl EncValue {
     /// Encrypt a value with the statically initialized encryption keys
-    pub fn encrypt(value: &[u8]) -> anyhow::Result<Self> {
-        let enc_key_id = EncKeys::get_static()?.enc_key_active.clone();
+    ///
+    /// # Panics
+    ///
+    /// If `init()` has not been called on valid EncKeys once before
+    pub fn encrypt(value: &[u8]) -> Result<Self, CryptrError> {
+        let enc_key_id = EncKeys::get_static().enc_key_active.clone();
         let header = EncValueHeader::from_enc_key_id(enc_key_id, None);
         let key = EncKeys::get_static_key(&header.enc_key_id)?;
         let payload = encryption::encrypt(&header.version, &header.alg, value, key)?;
@@ -211,7 +226,7 @@ impl EncValue {
     }
 
     /// Encrypt a value with a given password
-    pub fn encrypt_with_password(value: &[u8], password: &str) -> anyhow::Result<Self> {
+    pub fn encrypt_with_password(value: &[u8], password: &str) -> Result<Self, CryptrError> {
         let kdf_value = KdfValue::new(password);
         let enc_key_id = kdf_value.enc_key_value();
         let header = EncValueHeader::from_enc_key_id(enc_key_id, None);
@@ -222,8 +237,12 @@ impl EncValue {
     }
 
     /// Encrypt a value with the statically initialized encryption keys into a file
-    pub async fn encrypt_to_file(value: &[u8], path: &str) -> anyhow::Result<()> {
-        let enc_key_id = EncKeys::get_static()?.enc_key_active.clone();
+    ///
+    /// # Panics
+    ///
+    /// If `init()` has not been called on valid EncKeys once before
+    pub async fn encrypt_to_file(value: &[u8], path: &str) -> Result<(), CryptrError> {
+        let enc_key_id = EncKeys::get_static().enc_key_active.clone();
         let header = EncValueHeader::from_enc_key_id(enc_key_id, None);
         let key = EncKeys::get_static_key(&header.enc_key_id)?;
         let payload = encryption::encrypt(&header.version, &header.alg, value, key)?;
@@ -239,7 +258,7 @@ impl EncValue {
         value: &[u8],
         path: &str,
         password: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         let kdf_value = KdfValue::new(password);
         let header = EncValueHeader::from_enc_key_id(kdf_value.enc_key_value(), None);
         let payload = encryption::encrypt(&header.version, &header.alg, value, &kdf_value.value())?;
@@ -253,7 +272,7 @@ impl EncValue {
     /// Encrypt a value with the given encryption keys.
     ///
     /// It will by default always take the active keys.
-    pub fn encrypt_with_keys(value: &[u8], enc_keys: &EncKeys) -> anyhow::Result<Self> {
+    pub fn encrypt_with_keys(value: &[u8], enc_keys: &EncKeys) -> Result<Self, CryptrError> {
         let header = EncValueHeader::from_enc_key_id(enc_keys.enc_key_active.clone(), None);
         let key = enc_keys.get_key(&enc_keys.enc_key_active)?;
         let payload = encryption::encrypt(&header.version, &header.alg, value, key)?;
@@ -262,7 +281,7 @@ impl EncValue {
     }
 
     /// Encrypt a value with a specific Key ID from the statically initialized encryption keys
-    pub fn encrypt_with_key_id(value: &[u8], enc_key_id: String) -> anyhow::Result<Self> {
+    pub fn encrypt_with_key_id(value: &[u8], enc_key_id: String) -> Result<Self, CryptrError> {
         let header = EncValueHeader::from_enc_key_id(enc_key_id, None);
         let key = EncKeys::get_static_key(&header.enc_key_id)?;
         let payload = encryption::encrypt(&header.version, &header.alg, value, key)?;
@@ -271,26 +290,26 @@ impl EncValue {
     }
 
     /// Decrypt a value with the statically initialized encryption keys
-    pub fn decrypt(self) -> anyhow::Result<Bytes> {
+    pub fn decrypt(self) -> Result<Bytes, CryptrError> {
         let key = EncKeys::get_static_key(&self.header.enc_key_id)?;
         encryption::decrypt(&self.header.version, &self.header.alg, self.payload, key)
     }
 
     /// Decrypt a value using the given encryption keys
-    pub fn decrypt_with_keys(self, enc_keys: &EncKeys) -> anyhow::Result<Bytes> {
+    pub fn decrypt_with_keys(self, enc_keys: &EncKeys) -> Result<Bytes, CryptrError> {
         let key = enc_keys.get_key(&self.header.enc_key_id)?;
         encryption::decrypt(&self.header.version, &self.header.alg, self.payload, key)
     }
 
     /// Decrypt a value with a given password
-    pub fn decrypt_with_password(self, password: &str) -> anyhow::Result<Bytes> {
+    pub fn decrypt_with_password(self, password: &str) -> Result<Bytes, CryptrError> {
         let kdf_value = KdfValue::new(password);
         let key = kdf_value.value();
         encryption::decrypt(&self.header.version, &self.header.alg, self.payload, &key)
     }
 
     /// Try to build from raw encrypted bytes
-    pub fn try_from_bytes(bytes: Vec<u8>) -> anyhow::Result<Self> {
+    pub fn try_from_bytes(bytes: Vec<u8>) -> Result<Self, CryptrError> {
         let mut buf = Bytes::from(bytes);
         let header = EncValueHeader::try_extract(&mut buf)?;
 
@@ -301,7 +320,7 @@ impl EncValue {
     }
 
     /// Try to build from a raw encrypted file
-    pub async fn try_from_file(path: &str) -> anyhow::Result<Self> {
+    pub async fn try_from_file(path: &str) -> Result<Self, CryptrError> {
         let content = fs::read(path).await?;
         Self::try_from_bytes(content)
     }
@@ -320,23 +339,31 @@ impl EncValue {
 #[cfg(feature = "streaming")]
 impl EncValue {
     /// Streaming encryption with the statically initialized encryption keys
+    ///
+    /// # Panics
+    ///
+    /// If `init()` has not been called on valid EncKeys once before
     #[tracing::instrument]
     pub async fn encrypt_stream(
         reader: StreamReader<'_>,
         writer: StreamWriter<'_>,
-    ) -> anyhow::Result<()> {
-        let enc_key_id = EncKeys::get_static()?.enc_key_active.clone();
+    ) -> Result<(), CryptrError> {
+        let enc_key_id = EncKeys::get_static().enc_key_active.clone();
         Self::encrypt_stream_with_key_id(reader, writer, enc_key_id).await
     }
 
     /// Streaming encryption with the statically initialized encryption keys and custom chunk size
+    ///
+    /// # Panics
+    ///
+    /// If `init()` has not been called on valid EncKeys once before
     #[tracing::instrument]
     pub async fn encrypt_stream_with_chunk_size(
         reader: StreamReader<'_>,
         writer: StreamWriter<'_>,
         chunk_size_kb: ChunkSizeKb,
-    ) -> anyhow::Result<()> {
-        let enc_key_id = EncKeys::get_static()?.enc_key_active.clone();
+    ) -> Result<(), CryptrError> {
+        let enc_key_id = EncKeys::get_static().enc_key_active.clone();
         Self::encrypt_stream_with_chunk_size_and_key_id(reader, writer, chunk_size_kb, enc_key_id)
             .await
     }
@@ -347,7 +374,7 @@ impl EncValue {
         reader: StreamReader<'_>,
         writer: StreamWriter<'_>,
         enc_key_id: String,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         Self::encrypt_stream_with_chunk_size_and_key_id(
             reader,
             writer,
@@ -364,7 +391,7 @@ impl EncValue {
         writer: StreamWriter<'_>,
         enc_key_id: String,
         enc_key: Vec<u8>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         Self::encrypt_stream_with_chunk_size_and_key(
             reader,
             writer,
@@ -381,7 +408,7 @@ impl EncValue {
         reader: StreamReader<'_>,
         writer: StreamWriter<'_>,
         password: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         Self::encrypt_stream_with_chunk_size_and_password(
             reader,
             writer,
@@ -399,7 +426,7 @@ impl EncValue {
         writer: StreamWriter<'_>,
         chunk_size_kb: ChunkSizeKb,
         enc_key_id: String,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         let header = EncValueHeader::from_enc_key_id(enc_key_id, Some(chunk_size_kb.clone()));
         let key = EncKeys::get_static_key(&header.enc_key_id)?.to_vec();
         Self::encrypt_stream_with_data(reader, writer, chunk_size_kb, header, key).await
@@ -413,7 +440,7 @@ impl EncValue {
         chunk_size_kb: ChunkSizeKb,
         enc_key_id: String,
         enc_key: Vec<u8>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         let header = EncValueHeader::from_enc_key_id(enc_key_id, Some(chunk_size_kb.clone()));
         Self::encrypt_stream_with_data(reader, writer, chunk_size_kb, header, enc_key).await
     }
@@ -425,7 +452,7 @@ impl EncValue {
         writer: StreamWriter<'_>,
         chunk_size_kb: ChunkSizeKb,
         password: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         let kdf_value = KdfValue::new(password);
         let header =
             EncValueHeader::from_enc_key_id(kdf_value.enc_key_value(), Some(chunk_size_kb.clone()));
@@ -445,7 +472,7 @@ impl EncValue {
         chunk_size_kb: ChunkSizeKb,
         header: EncValueHeader,
         key: Vec<u8>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         // chacha20 stream cipher nonce is 7 bytes
         let nonce_size = header.alg.nonce_size_stream() as usize;
         let nonce = secure_random_vec(nonce_size)?; // TODO change to slice
@@ -491,7 +518,7 @@ impl EncValue {
     pub async fn decrypt_stream(
         reader: StreamReader<'_>,
         writer: StreamWriter<'_>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         Self::decrypt_stream_with_data(reader, writer, None, None).await
     }
 
@@ -501,7 +528,7 @@ impl EncValue {
         reader: StreamReader<'_>,
         writer: StreamWriter<'_>,
         enc_keys: &EncKeys,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         Self::decrypt_stream_with_data(reader, writer, Some(enc_keys), None).await
     }
 
@@ -511,7 +538,7 @@ impl EncValue {
         reader: StreamReader<'_>,
         writer: StreamWriter<'_>,
         password: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         Self::decrypt_stream_with_data(reader, writer, None, Some(password)).await
     }
 
@@ -520,7 +547,7 @@ impl EncValue {
         writer: StreamWriter<'_>,
         enc_keys: Option<&EncKeys>,
         password: Option<&str>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), CryptrError> {
         let (tx_init, rx_init) = oneshot::channel();
         let (tx_to_decryptor, rx_to_decryptor) = flume::bounded(CHANNELS);
 
@@ -542,7 +569,7 @@ impl EncValue {
             } else if let Some(enc_keys) = enc_keys {
                 enc_keys.get_key(&header.enc_key_id)?.to_vec()
             } else {
-                return Err(Error::msg(
+                return Err(CryptrError::Decryption(
                     "Stream has been encrypted with a password, but none was given",
                 ));
             }

@@ -1,5 +1,5 @@
-use anyhow::{Context, Error};
 use cryptr::keys::EncKeys;
+use cryptr::CryptrError;
 use rusty_s3::{Bucket, Credentials, UrlStyle};
 use std::env;
 use std::fmt::{Display, Formatter};
@@ -55,22 +55,29 @@ impl S3Config {
         }
     }
 
-    pub fn bucket(&self, name: String) -> anyhow::Result<Bucket> {
-        let url = self.url.parse()?;
+    pub fn bucket(&self, name: String) -> Result<Bucket, CryptrError> {
+        let url = self
+            .url
+            .parse()
+            .map_err(|_| CryptrError::Generic("Cannot parse URL".to_string()))?;
         let path_style = if self.path_style {
             UrlStyle::Path
         } else {
             UrlStyle::VirtualHost
         };
-        Ok(Bucket::new(url, path_style, name, self.region.to_string())?)
+
+        let bucket = Bucket::new(url, path_style, name, self.region.to_string())
+            .map_err(|err| CryptrError::S3(err.to_string()))?;
+
+        Ok(bucket)
     }
 
-    pub async fn read_from_file(path: &str) -> anyhow::Result<Self> {
+    pub async fn read_from_file(path: &str) -> Result<Self, CryptrError> {
         dotenvy::from_filename(path)?;
         Self::from_env().await
     }
 
-    pub async fn from_env() -> anyhow::Result<Self> {
+    pub async fn from_env() -> Result<Self, CryptrError> {
         let url = env::var("S3_URL").unwrap_or_default();
         let path_style = env::var("S3_PATH_STYLE")
             .map(|s| s.parse::<bool>().unwrap_or_default())
@@ -96,12 +103,12 @@ pub struct EncConfig {
 }
 
 impl EncConfig {
-    pub async fn read() -> anyhow::Result<Self> {
+    pub async fn read() -> Result<Self, CryptrError> {
         let path = EncKeys::config_path()?;
         Self::read_from_file(&path).await
     }
 
-    pub async fn read_from_file(path: &str) -> anyhow::Result<Self> {
+    pub async fn read_from_file(path: &str) -> Result<Self, CryptrError> {
         let enc_keys = EncKeys::read_from_file(path)?;
         let s3_config = S3Config::read_from_file(path).await?;
         Ok(Self {
@@ -110,26 +117,21 @@ impl EncConfig {
         })
     }
 
-    pub async fn save(&self) -> anyhow::Result<()> {
+    pub async fn save(&self) -> Result<(), CryptrError> {
         let path = EncKeys::config_path()?;
         self.save_to_file(&path).await
     }
 
-    pub async fn save_to_file(&self, path: &str) -> anyhow::Result<()> {
+    pub async fn save_to_file(&self, path: &str) -> Result<(), CryptrError> {
         let path = match path.rsplit_once('/') {
             None => path.to_string(),
             Some((path, file)) => {
-                fs::create_dir_all(path)
-                    .await
-                    .context("Cannot create target enc keys path")?;
+                fs::create_dir_all(path).await?;
                 let path_full = format!("{}/{}", path, file);
                 if let Ok(file) = File::open(&path_full).await {
                     let meta = file.metadata().await?;
                     if meta.is_dir() {
-                        return Err(Error::msg(format!(
-                            "Target path {} is a directory",
-                            path_full
-                        )));
+                        return Err(CryptrError::File("target path is a directory"));
                     }
                 }
 
@@ -149,7 +151,7 @@ impl EncConfig {
         Ok(())
     }
 
-    fn to_string(&self) -> anyhow::Result<String> {
+    fn to_string(&self) -> Result<String, CryptrError> {
         Ok(format!(
             r#"# cryptr config
 

@@ -1,17 +1,9 @@
-use anyhow::Error;
+use cryptr::CryptrError;
 use std::fmt::Write;
 use tokio::io::{stdin, AsyncBufReadExt, BufReader};
 
-// pub fn get_home_dir() -> anyhow::Result<String> {
-//     let home_path = home::home_dir().ok_or_else(|| Error::msg("Cannot get $HOME"))?;
-//     let home_str = home_path
-//         .to_str()
-//         .ok_or_else(|| Error::msg(format!("Cannot convert {:?} to str", home_path)))?;
-//     Ok(home_str.to_string())
-// }
-
 /// Reads a line from stdin
-pub(crate) async fn read_line_stdin() -> anyhow::Result<String> {
+pub(crate) async fn read_line_stdin() -> Result<String, CryptrError> {
     let (tx, rx) = flume::unbounded::<Option<String>>();
 
     tokio::spawn(async move {
@@ -23,18 +15,16 @@ pub(crate) async fn read_line_stdin() -> anyhow::Result<String> {
             Err(_) => None,
         };
         tx.send_async(res).await.unwrap();
-
-        // if let Ok(Some(line)) = stdin.lines().next_line().await {
-        //     if tx.send_async(line).await.is_err() {
-        //         eprintln!("Error reading input");
-        //     }
-        // }
     });
 
     let mut res = String::with_capacity(32);
     while let Ok(data) = rx.recv_async().await {
         match data {
-            None => return Err(Error::msg("Error reading line from stdin")),
+            None => {
+                return Err(CryptrError::Cli(
+                    "Error reading line from stdin".to_string(),
+                ))
+            }
             Some(data) => write!(res, "{}", data)?,
         }
     }
@@ -66,13 +56,13 @@ impl Default for PromptPassword {
 }
 
 impl PromptPassword {
-    pub async fn prompt(&self, message: String) -> anyhow::Result<String> {
+    pub async fn prompt(&self, message: String) -> Result<String, CryptrError> {
         let password =
             tokio::task::spawn_blocking(move || rpassword::prompt_password(message)).await??;
         Ok(password)
     }
 
-    pub async fn prompt_validated(&self, message: &str) -> anyhow::Result<String> {
+    pub async fn prompt_validated(&self, message: &str) -> Result<String, CryptrError> {
         let mut password;
         loop {
             let msg = message.to_string();
@@ -90,7 +80,7 @@ impl PromptPassword {
         }
     }
 
-    fn policy_str(&self) -> anyhow::Result<String> {
+    fn policy_str(&self) -> Result<String, CryptrError> {
         let mut policy = "Password policy:\n".to_string();
 
         if self.not_empty {
@@ -120,19 +110,19 @@ impl PromptPassword {
         Ok(policy)
     }
 
-    fn validate(&self, password: &str) -> anyhow::Result<()> {
+    fn validate(&self, password: &str) -> Result<(), CryptrError> {
         if self.not_empty && password.is_empty() {
-            return Err(Error::msg(self.policy_str()?));
+            return Err(CryptrError::Cli(self.policy_str()?));
         }
 
         if let Some(min) = self.min_len {
             if password.len() < min {
-                return Err(Error::msg(self.policy_str()?));
+                return Err(CryptrError::Cli(self.policy_str()?));
             }
         }
         if let Some(max) = self.max_len {
             if password.len() > max {
-                return Err(Error::msg(self.policy_str()?));
+                return Err(CryptrError::Cli(self.policy_str()?));
             }
         }
 
@@ -151,17 +141,17 @@ impl PromptPassword {
 
         if let Some(lower) = self.contains_lowercase {
             if contains_lower < lower {
-                return Err(Error::msg(self.policy_str()?));
+                return Err(CryptrError::Cli(self.policy_str()?));
             }
         }
         if let Some(upper) = self.contains_uppercase {
             if contains_upper < upper {
-                return Err(Error::msg(self.policy_str()?));
+                return Err(CryptrError::Cli(self.policy_str()?));
             }
         }
         if let Some(digit) = self.contains_digit {
             if contains_digit < digit {
-                return Err(Error::msg(self.policy_str()?));
+                return Err(CryptrError::Cli(self.policy_str()?));
             }
         }
 

@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use flume::Receiver;
 use std::fmt::Formatter;
 use tracing::debug;
+use crate::CryptrError;
 
 /// Streaming FileWriter
 ///
@@ -25,9 +26,8 @@ impl EncStreamWriter for FileWriter<'_> {
 
     async fn write(
         &mut self,
-        rx: Receiver<anyhow::Result<(LastStreamElement, StreamChunk)>>,
-    ) -> anyhow::Result<()> {
-        use anyhow::Error;
+        rx: Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>,
+    ) -> Result<(), CryptrError> {
         use tokio::fs;
         use tokio::fs::{File, OpenOptions};
         use tokio::io::AsyncWriteExt;
@@ -37,13 +37,13 @@ impl EncStreamWriter for FileWriter<'_> {
         if let Ok(f) = File::open(&self.path).await {
             let meta = f.metadata().await?;
             if meta.is_dir() {
-                return Err(Error::msg("Target file is a directory"));
+                return Err(CryptrError::File("Target file is a directory"));
             }
 
             if self.overwrite_target {
                 should_remove = true;
             } else {
-                return Err(Error::msg("Target file exists already"));
+                return Err(CryptrError::File("Target file exists already"));
             }
         }
         if should_remove {

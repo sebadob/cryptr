@@ -1,9 +1,9 @@
 use crate::value::{EncAlg, EncVersion};
-use anyhow::Error;
 use bytes::{BufMut, Bytes, BytesMut};
 use chacha20poly1305::aead::{Aead, OsRng};
 use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Key, KeyInit, Nonce};
 
+use crate::CryptrError;
 #[cfg(feature = "streaming")]
 use crate::{
     stream::{LastStreamElement, StreamChunk},
@@ -13,6 +13,10 @@ use crate::{
 use chacha20poly1305::aead;
 #[cfg(feature = "streaming")]
 use tracing::{debug, error};
+
+#[cfg(feature = "streaming")]
+type StreamReceiver =
+    Result<flume::Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>, CryptrError>;
 
 pub(crate) static MAC_SIZE_CHACHA_STREAM: u8 = 16;
 pub(crate) static NONCE_SIZE_CHACHA: u8 = 12;
@@ -24,13 +28,13 @@ pub(crate) static NONCE_SIZE_CHACHA_STREAM: u8 = 7;
 pub struct ChunkSizeKb(u16);
 
 impl TryFrom<u16> for ChunkSizeKb {
-    type Error = Error;
+    type Error = CryptrError;
 
     /// Chunk size in KiB. `value` must be <= 1024
     #[inline]
     fn try_from(value: u16) -> Result<Self, Self::Error> {
         if value > 1024 {
-            Err(Error::msg("ChunkSizeKb max value: 1024"))
+            Err(CryptrError::Encryption("ChunkSizeKb max value: 1024"))
         } else {
             Ok(Self(value))
         }
@@ -67,18 +71,12 @@ impl ChunkSizeKb {
 #[derive(Debug)]
 pub(crate) struct Ciphertext(Vec<u8>);
 
-// impl Ciphertext {
-//     pub fn into_inner(self) -> Vec<u8> {
-//         self.0
-//     }
-// }
-
 pub(crate) fn decrypt(
     version: &EncVersion,
     alg: &EncAlg,
     ciphertext: Bytes,
     key: &[u8],
-) -> anyhow::Result<Bytes> {
+) -> Result<Bytes, CryptrError> {
     match version {
         EncVersion::V1 => match alg {
             EncAlg::ChaCha20Poly1305 => decrypt_chacha_v1(ciphertext, key),
@@ -91,7 +89,7 @@ pub(crate) fn encrypt(
     alg: &EncAlg,
     plain: &[u8],
     key: &[u8],
-) -> anyhow::Result<Bytes> {
+) -> Result<Bytes, CryptrError> {
     match version {
         EncVersion::V1 => match alg {
             EncAlg::ChaCha20Poly1305 => encrypt_chacha_v1(plain, key),
@@ -103,11 +101,11 @@ pub(crate) fn encrypt(
 pub(crate) fn encrypt_stream(
     version: &EncVersion,
     alg: &EncAlg,
-    rx: flume::Receiver<anyhow::Result<(LastStreamElement, StreamChunk)>>,
+    rx: flume::Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>,
     key: Vec<u8>,
     nonce: Vec<u8>,
     first_data: Bytes,
-) -> anyhow::Result<flume::Receiver<anyhow::Result<(LastStreamElement, StreamChunk)>>> {
+) -> StreamReceiver {
     match version {
         EncVersion::V1 => match alg {
             EncAlg::ChaCha20Poly1305 => encrypt_chacha_stream_v1(rx, key, nonce, first_data),
@@ -119,10 +117,10 @@ pub(crate) fn encrypt_stream(
 pub(crate) fn decrypt_stream(
     version: &EncVersion,
     alg: &EncAlg,
-    rx: flume::Receiver<anyhow::Result<(LastStreamElement, StreamChunk)>>,
+    rx: flume::Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>,
     key: Vec<u8>,
     nonce: Vec<u8>,
-) -> anyhow::Result<flume::Receiver<anyhow::Result<(LastStreamElement, StreamChunk)>>> {
+) -> StreamReceiver {
     match version {
         EncVersion::V1 => match alg {
             EncAlg::ChaCha20Poly1305 => decrypt_chacha_channel_stream_v1(rx, key, nonce),
@@ -131,7 +129,7 @@ pub(crate) fn decrypt_stream(
 }
 
 #[inline]
-fn decrypt_chacha_v1(mut ciphertext: Bytes, key: &[u8]) -> anyhow::Result<Bytes> {
+fn decrypt_chacha_v1(mut ciphertext: Bytes, key: &[u8]) -> Result<Bytes, CryptrError> {
     let k = Key::from_slice(key);
     let cipher = ChaCha20Poly1305::new(k);
     // 96 bits nonce is always the first bytes
@@ -142,7 +140,7 @@ fn decrypt_chacha_v1(mut ciphertext: Bytes, key: &[u8]) -> anyhow::Result<Bytes>
 }
 
 #[inline]
-fn encrypt_chacha_v1(plain: &[u8], key: &[u8]) -> anyhow::Result<Bytes> {
+fn encrypt_chacha_v1(plain: &[u8], key: &[u8]) -> Result<Bytes, CryptrError> {
     let k = Key::from_slice(key);
     let cipher = ChaCha20Poly1305::new(k);
     let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
@@ -158,11 +156,11 @@ fn encrypt_chacha_v1(plain: &[u8], key: &[u8]) -> anyhow::Result<Bytes> {
 #[tracing::instrument]
 #[inline]
 fn encrypt_chacha_stream_v1(
-    rx: flume::Receiver<anyhow::Result<(LastStreamElement, StreamChunk)>>,
+    rx: flume::Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>,
     key: Vec<u8>,
     nonce: Vec<u8>,
     first_data: Bytes,
-) -> anyhow::Result<flume::Receiver<anyhow::Result<(LastStreamElement, StreamChunk)>>> {
+) -> StreamReceiver {
     let (tx_cipher, rx_cipher) = flume::bounded(CHANNELS);
 
     tokio::spawn(async move {
@@ -193,16 +191,22 @@ fn encrypt_chacha_stream_v1(
                         .send_async(Ok((LastStreamElement::No, StreamChunk::new(ciperthext))))
                         .await
                     {
-                        let err = format!("Error sending next cipertext over channel: {:?}", err);
-                        error!("{}", err);
-                        tx_cipher.send_async(Err(Error::msg(err))).await.unwrap();
+                        let msg = "Error sending next cipertext over channel";
+                        error!("{}: {}", msg, err);
+                        tx_cipher
+                            .send_async(Err(CryptrError::Encryption(msg)))
+                            .await
+                            .unwrap();
                         return;
                     }
                 }
                 Err(err) => {
-                    let err = format!("Error encrypting next stream value: {:?}", err);
-                    error!("{}", err);
-                    tx_cipher.send_async(Err(Error::msg(err))).await.unwrap();
+                    let msg = "Error encrypting next stream value";
+                    error!("{}: {}", msg, err);
+                    tx_cipher
+                        .send_async(Err(CryptrError::Encryption(msg)))
+                        .await
+                        .unwrap();
                     return;
                 }
             }
@@ -214,16 +218,22 @@ fn encrypt_chacha_stream_v1(
                     .send_async(Ok((LastStreamElement::Yes, StreamChunk::new(ciperthext))))
                     .await
                 {
-                    let err = format!("Error sending last cipertext over channel: {:?}", err);
-                    error!("{}", err);
-                    tx_cipher.send_async(Err(Error::msg(err))).await.unwrap();
+                    let msg = "Error sending last cipertext over channel";
+                    error!("{}: {}", msg, err);
+                    tx_cipher
+                        .send_async(Err(CryptrError::Encryption(msg)))
+                        .await
+                        .unwrap();
                     return;
                 }
             }
             Err(err) => {
-                let err = format!("Error encrypting last stream value: {:?}", err);
-                error!("{}", err);
-                tx_cipher.send_async(Err(Error::msg(err))).await.unwrap();
+                let msg = "Error encrypting last stream value";
+                error!("{}: {}", msg, err);
+                tx_cipher
+                    .send_async(Err(CryptrError::Encryption(msg)))
+                    .await
+                    .unwrap();
                 return;
             }
         }
@@ -238,10 +248,10 @@ fn encrypt_chacha_stream_v1(
 #[tracing::instrument]
 #[inline]
 fn decrypt_chacha_channel_stream_v1(
-    rx: flume::Receiver<anyhow::Result<(LastStreamElement, StreamChunk)>>,
+    rx: flume::Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>,
     key: Vec<u8>,
     nonce: Vec<u8>,
-) -> anyhow::Result<flume::Receiver<anyhow::Result<(LastStreamElement, StreamChunk)>>> {
+) -> StreamReceiver {
     let (tx_plain, rx_plain) = flume::bounded(CHANNELS);
     tokio::spawn(async move {
         let key = Key::from_slice(key.as_slice());
@@ -262,17 +272,23 @@ fn decrypt_chacha_channel_stream_v1(
                         .send_async(Ok((LastStreamElement::No, StreamChunk::new(plaintext))))
                         .await
                     {
-                        let err = format!("Error sending next plaintext over channel: {:?}", err);
-                        error!("{}", err);
-                        tx_plain.send_async(Err(Error::msg(err))).await.unwrap();
+                        let msg = "Error sending next plaintext over channel";
+                        error!("{}: {}", msg, err);
+                        tx_plain
+                            .send_async(Err(CryptrError::Decryption(msg)))
+                            .await
+                            .unwrap();
                         return;
                     }
                 }
                 Err(err) => {
-                    let err = format!("Error decrypting next stream value: {:?}", err.to_string());
-                    error!("{}", err);
+                    let msg = "Error decrypting next stream value";
+                    error!("{}: {}", msg, err);
                     error!("payload length: {}", payload.as_ref().len());
-                    tx_plain.send_async(Err(Error::msg(err))).await.unwrap();
+                    tx_plain
+                        .send_async(Err(CryptrError::Decryption(msg)))
+                        .await
+                        .unwrap();
                     return;
                 }
             }
@@ -284,16 +300,22 @@ fn decrypt_chacha_channel_stream_v1(
                     .send_async(Ok((LastStreamElement::Yes, StreamChunk::new(plaintext))))
                     .await
                 {
-                    let err = format!("Error sending last plaintext over channel: {:?}", err);
-                    error!("{}", err);
-                    tx_plain.send_async(Err(Error::msg(err))).await.unwrap();
+                    let msg = "Error sending last plaintext over channel";
+                    error!("{}: {}", msg, err);
+                    tx_plain
+                        .send_async(Err(CryptrError::Decryption(msg)))
+                        .await
+                        .unwrap();
                     return;
                 }
             }
             Err(err) => {
-                let err = format!("Error decrypting last stream value: {:?}", err.to_string());
-                error!("{}", err);
-                tx_plain.send_async(Err(Error::msg(err))).await.unwrap();
+                let msg = "Error decrypting last stream value";
+                error!("{}: {}", msg, err);
+                tx_plain
+                    .send_async(Err(CryptrError::Decryption(msg)))
+                    .await
+                    .unwrap();
                 return;
             }
         }

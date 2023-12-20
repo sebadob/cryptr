@@ -9,6 +9,7 @@ use std::cmp::min;
 use std::fmt::Formatter;
 use tokio::task::JoinHandle;
 use tracing::debug;
+use crate::CryptrError;
 
 /// Streaming In-Memory Reader
 ///
@@ -26,8 +27,8 @@ impl EncStreamReader for MemoryReader {
     async fn spawn_reader_encryption(
         self,
         chunk_size: ChunkSizeKb,
-        tx: Sender<anyhow::Result<(LastStreamElement, StreamChunk)>>,
-    ) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
+        tx: Sender<Result<(LastStreamElement, StreamChunk), CryptrError>>,
+    ) -> Result<JoinHandle<Result<(), CryptrError>>, CryptrError> {
         let mut chunk_size = chunk_size.value_bytes() as usize;
         let value_len = self.0.len();
 
@@ -46,7 +47,7 @@ impl EncStreamReader for MemoryReader {
 
         debug!("chunks_total: {} chunk size: {}", chunks_total, chunk_size,);
 
-        let handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+        let handle: JoinHandle<Result<(), CryptrError>> = tokio::spawn(async move {
             let mut total = 0;
             let value = self.0;
 
@@ -77,8 +78,8 @@ impl EncStreamReader for MemoryReader {
     async fn spawn_reader_decryption(
         self,
         tx_init: oneshot::Sender<(EncValueHeader, Vec<u8>)>,
-        tx: Sender<anyhow::Result<(LastStreamElement, StreamChunk)>>,
-    ) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
+        tx: Sender<Result<(LastStreamElement, StreamChunk), CryptrError>>,
+    ) -> Result<JoinHandle<Result<(), CryptrError>>, CryptrError> {
         // we need to extract the header and the original nonce from the source file
         let (header, nonce, payload_offset) =
             EncValueHeader::try_extract_with_nonce(self.0.as_slice())?;
@@ -93,7 +94,7 @@ impl EncStreamReader for MemoryReader {
         let payload_offset = payload_offset as usize;
         let value_len = self.0.len();
 
-        let handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+        let handle: JoinHandle<Result<(), CryptrError>> = tokio::spawn(async move {
             let mut total = 0;
             let value = self.0;
             let mut start = payload_offset;
