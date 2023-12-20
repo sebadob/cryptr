@@ -11,6 +11,8 @@ use std::io::Error;
 
 #[cfg(feature = "streaming")]
 use crate::stream::{LastStreamElement, StreamChunk};
+
+pub use bytes::Bytes;
 #[cfg(feature = "s3")]
 pub use stream::reader::s3_reader::S3Reader;
 #[cfg(feature = "streaming")]
