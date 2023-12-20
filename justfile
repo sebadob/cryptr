@@ -42,7 +42,14 @@ build:
     set -euxo pipefail
     # build as musl to make sure this works
     cargo build --release --target x86_64-unknown-linux-musl
+    cp target/x86_64-unknown-linux-musl/release/cryptr out/cryptr_{{TAG}}
 
+    # this needs mingw32 to be installed:
+    # sudo dnf install mingw32-gcc mingw64-gcc  -y
+    cargo build --release --target x86_64-pc-windows-gnu
+    cp target/x86_64-pc-windows-gnu/release/cryptr.exe out/cryptr_{{TAG}}.exe
+
+    git add out/*
 
 # verifies the MSRV
 msrv-verify:
