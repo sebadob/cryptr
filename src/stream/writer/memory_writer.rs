@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use flume::Receiver;
 use std::fmt::Formatter;
 use tracing::debug;
+use crate::CryptrError;
 
 /// Streaming In-Memory Writer
 ///
@@ -18,8 +19,8 @@ impl EncStreamWriter for MemoryWriter<'_> {
 
     async fn write(
         &mut self,
-        rx: Receiver<anyhow::Result<(LastStreamElement, StreamChunk)>>,
-    ) -> anyhow::Result<()> {
+        rx: Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>,
+    ) -> Result<(), CryptrError> {
         // make sure the target is empty
         self.0.clear();
 

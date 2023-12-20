@@ -1,7 +1,7 @@
-use cryptr::{EncKeys, EncValue};
+use cryptr::{CryptrError, EncKeys, EncValue};
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), CryptrError> {
     // cryptr supports 2 ways to use encryption keys:
     // 1. static init
     // 2. dynamic

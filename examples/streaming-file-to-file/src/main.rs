@@ -1,10 +1,10 @@
 use cryptr::utils::secure_random_vec;
-use cryptr::{EncKeys, EncValue, FileReader, FileWriter, StreamReader, StreamWriter};
+use cryptr::{CryptrError, EncKeys, EncValue, FileReader, FileWriter, StreamReader, StreamWriter};
 use sha2::{Digest, Sha256};
 use tokio::fs;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), CryptrError> {
     let enc_keys = EncKeys::generate()?;
     enc_keys.init()?;
 

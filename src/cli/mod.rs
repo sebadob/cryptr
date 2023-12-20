@@ -2,6 +2,7 @@ use crate::cli::actions::Action;
 use crate::cli::args::{Args, ArgsKeys, ArgsKeysConvert, ArgsS3};
 use clap::Parser;
 use tracing::debug;
+use cryptr::CryptrError;
 
 mod actions;
 mod args;
@@ -9,7 +10,7 @@ mod config;
 mod logging;
 pub(crate) mod utils;
 
-pub async fn run() -> anyhow::Result<()> {
+pub async fn run() -> Result<(), CryptrError> {
     let level = logging::setup_logging();
     debug!("Log Level set to {}", level);
 

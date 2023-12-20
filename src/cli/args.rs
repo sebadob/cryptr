@@ -52,12 +52,12 @@ pub struct ArgsEncryptDecrypt {
 }
 
 impl ArgsEncryptDecrypt {
-    pub fn from_to_fmt() -> &'static str {
+    pub fn from_to_fmt() -> String {
         r#"Format:
 File         -> file:/path/to/your/file
 S3           -> s3:/bucket_name/object_name
 Shell Input  -> leave empty
-"#
+"#.to_string()
     }
 }
 

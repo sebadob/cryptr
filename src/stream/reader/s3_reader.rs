@@ -3,7 +3,6 @@ use crate::stream::{
     http_client, http_client_insecure, EncStreamReader, LastStreamElement, StreamChunk,
 };
 use crate::value::EncValueHeader;
-use anyhow::Error;
 use async_trait::async_trait;
 use bytes::BytesMut;
 use flume::Sender;
@@ -19,6 +18,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio::{sync, time};
 use tracing::{debug, error};
+use crate::CryptrError;
 
 const SIGN_DUR: Duration = Duration::from_secs(600);
 
@@ -50,8 +50,8 @@ impl EncStreamReader for S3Reader<'_> {
     async fn spawn_reader_encryption(
         self,
         chunk_size: ChunkSizeKb,
-        tx: Sender<anyhow::Result<(LastStreamElement, StreamChunk)>>,
-    ) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
+        tx: Sender<Result<(LastStreamElement, StreamChunk), CryptrError>>,
+    ) -> Result<JoinHandle<Result<(), CryptrError>>, CryptrError> {
         let client = if self.danger_accept_invalid_certs {
             http_client_insecure()
         } else {
@@ -88,8 +88,8 @@ impl EncStreamReader for S3Reader<'_> {
             let mut data = stream.next().await;
             if let Some(Err(err)) = &data {
                 let msg = format!("S3 bucket error: {}", err);
-                tx.send_async(Err(Error::msg(msg.clone()))).await?;
-                return Err(Error::msg(msg));
+                tx.send_async(Err(CryptrError::S3(msg.clone()))).await?;
+                return Err(CryptrError::S3(msg));
             }
 
             let chunk_size = chunk_size.value_bytes() as usize;
@@ -119,8 +119,8 @@ impl EncStreamReader for S3Reader<'_> {
                         // we have at least one more element
                         if res.is_err() {
                             debug!("stream rest in loop error: {:?}", res);
-                            tx.send_async(Err(Error::msg(format!("{:?}", res)))).await?;
-                            return Err(Error::msg(format!("{:?}", res)));
+                            tx.send_async(Err(CryptrError::S3(format!("{:?}", res)))).await?;
+                            return Err(CryptrError::S3(format!("{:?}", res)));
                         }
                     }
                 }
@@ -149,8 +149,8 @@ impl EncStreamReader for S3Reader<'_> {
     async fn spawn_reader_decryption(
         self,
         tx_init: oneshot::Sender<(EncValueHeader, Vec<u8>)>,
-        tx: Sender<anyhow::Result<(LastStreamElement, StreamChunk)>>,
-    ) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
+        tx: Sender<Result<(LastStreamElement, StreamChunk), CryptrError>>,
+    ) -> Result<JoinHandle<Result<(), CryptrError>>, CryptrError> {
         let client = if self.danger_accept_invalid_certs {
             http_client_insecure()
         } else {
@@ -199,8 +199,8 @@ impl EncStreamReader for S3Reader<'_> {
             let mut data = stream.next().await;
             if let Some(Err(err)) = &data {
                 let msg = format!("S3 bucket error: {}", err);
-                tx.send_async(Err(Error::msg(msg.clone()))).await?;
-                return Err(Error::msg(msg));
+                tx.send_async(Err(CryptrError::S3(msg.clone()))).await?;
+                return Err(CryptrError::S3(msg));
             }
 
             // let chunk_size = chunk_size.value_bytes() as usize;
@@ -229,8 +229,8 @@ impl EncStreamReader for S3Reader<'_> {
                                     "Error extracting encryption header from first chunk: {:?}",
                                     err
                                 );
-                                tx.send_async(Err(Error::msg(msg.clone()))).await?;
-                                return Err(Error::msg(msg));
+                                tx.send_async(Err(CryptrError::S3(msg.clone()))).await?;
+                                return Err(CryptrError::S3(msg));
                             }
                         };
                     debug!(
@@ -265,8 +265,8 @@ impl EncStreamReader for S3Reader<'_> {
                     Some(res) => {
                         if res.is_err() {
                             debug!("stream rest in loop error: {:?}", res);
-                            tx.send_async(Err(Error::msg(format!("{:?}", res)))).await?;
-                            return Err(Error::msg(format!("{:?}", res)));
+                            tx.send_async(Err(CryptrError::S3(format!("{:?}", res)))).await?;
+                            return Err(CryptrError::S3(format!("{:?}", res)));
                         }
                     }
                 }
