@@ -336,8 +336,8 @@ mod tests {
         let plain = "my Secret Value 1337";
         let key = secure_random_vec(32).unwrap();
 
-        let enc = encrypt_chacha_v1(plain.as_bytes(), key.as_slice()).unwrap();
-        let dec = decrypt_chacha_v1(enc.clone(), key.as_slice()).unwrap();
+        let mut enc = encrypt_chacha_v1(plain.as_bytes(), key.as_slice()).unwrap();
+        let dec = decrypt_chacha_v1(&mut enc, key.as_slice()).unwrap();
         assert_ne!(enc, dec);
 
         let plain_dec = String::from_utf8(dec.to_vec()).unwrap();
