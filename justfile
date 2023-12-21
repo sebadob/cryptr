@@ -49,7 +49,7 @@ build:
     cargo build --release --target x86_64-pc-windows-gnu
     cp target/x86_64-pc-windows-gnu/release/cryptr.exe out/cryptr_{{TAG}}.exe
 
-    git add out/*
+    #git add out/*
 
 # verifies the MSRV
 msrv-verify:
