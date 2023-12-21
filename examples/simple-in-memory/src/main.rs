@@ -33,16 +33,17 @@ async fn main() -> Result<(), CryptrError> {
     println!("{:?}", encrypted.header);
 
     // At this point, we could convert the EncValue to bytes and do whatever we want with it.
-    // Technically, it does not need to consume the value, but it does this on purpose, so you
-    // always have only one value to care about.
-    //
-    // Note: the only reason we are cloning in this example is because we want to check the
-    // decryption in the following step. Usually, we would just send the encrypted value now
-    // somewhere or store it in a database.
-    let _bytes = encrypted.clone().into_bytes();
+    let bytes = encrypted.clone().into_bytes();
+
+    // Bytes is a nice format if you want to further manipulate an work with the volue,
+    // otherwise, convert it to a std Vec<u8>;
+    let bytes_vec = bytes.to_vec();
 
     // let's make sure, that the decryption actually returns our result
-    let decrypted = encrypted.decrypt()?;
+    // re-build our EncValue - in this format, the value is always encrypted, no matter from where it came
+    let enc_value = EncValue::try_from_bytes(bytes_vec)?;
+    // decrypt it
+    let decrypted = enc_value.decrypt()?;
     assert_eq!(plain.as_bytes(), decrypted.as_ref());
 
     println!("Plain value: {}", plain);
