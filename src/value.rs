@@ -290,49 +290,64 @@ impl EncValue {
     }
 
     /// Decrypt a value with the statically initialized encryption keys
-    pub fn decrypt(self) -> Result<Bytes, CryptrError> {
+    pub fn decrypt(mut self) -> Result<Bytes, CryptrError> {
         let key = EncKeys::get_static_key(&self.header.enc_key_id)?;
-        encryption::decrypt(&self.header.version, &self.header.alg, self.payload, key)
+        encryption::decrypt(
+            &self.header.version,
+            &self.header.alg,
+            &mut self.payload,
+            key,
+        )
     }
 
     /// Decrypt a given Bytes directly
-    pub fn decrypt_bytes(mut bytes: Bytes) -> Result<Bytes, CryptrError> {
-        let header = EncValueHeader::try_extract(&mut bytes)?;
+    pub fn decrypt_bytes(bytes: &mut Bytes) -> Result<Bytes, CryptrError> {
+        let header = EncValueHeader::try_extract(bytes)?;
         let key = EncKeys::get_static_key(&header.enc_key_id)?;
         let res = encryption::decrypt(&header.version, &header.alg, bytes, key)?;
         Ok(res)
     }
 
     /// Decrypt a value using the given encryption keys
-    pub fn decrypt_with_keys(self, enc_keys: &EncKeys) -> Result<Bytes, CryptrError> {
+    pub fn decrypt_with_keys(mut self, enc_keys: &EncKeys) -> Result<Bytes, CryptrError> {
         let key = enc_keys.get_key(&self.header.enc_key_id)?;
-        encryption::decrypt(&self.header.version, &self.header.alg, self.payload, key)
+        encryption::decrypt(
+            &self.header.version,
+            &self.header.alg,
+            &mut self.payload,
+            key,
+        )
     }
 
     /// Decrypt a given Bytes directly with given keys
     pub fn decrypt_bytes_with_keys(
-        mut bytes: Bytes,
+        bytes: &mut Bytes,
         enc_keys: &EncKeys,
     ) -> Result<Bytes, CryptrError> {
-        let header = EncValueHeader::try_extract(&mut bytes)?;
+        let header = EncValueHeader::try_extract(bytes)?;
         let key = enc_keys.get_key(&header.enc_key_id)?;
         let res = encryption::decrypt(&header.version, &header.alg, bytes, key)?;
         Ok(res)
     }
 
     /// Decrypt a value with a given password
-    pub fn decrypt_with_password(self, password: &str) -> Result<Bytes, CryptrError> {
+    pub fn decrypt_with_password(mut self, password: &str) -> Result<Bytes, CryptrError> {
         let kdf_value = KdfValue::new(password);
         let key = kdf_value.value();
-        encryption::decrypt(&self.header.version, &self.header.alg, self.payload, &key)
+        encryption::decrypt(
+            &self.header.version,
+            &self.header.alg,
+            &mut self.payload,
+            &key,
+        )
     }
 
     /// Decrypt a given Bytes directly with given password
     pub fn decrypt_bytes_with_password(
-        mut bytes: Bytes,
+        bytes: &mut Bytes,
         password: &str,
     ) -> Result<Bytes, CryptrError> {
-        let header = EncValueHeader::try_extract(&mut bytes)?;
+        let header = EncValueHeader::try_extract(bytes)?;
         let kdf_value = KdfValue::new(password);
         let key = kdf_value.value();
         let res = encryption::decrypt(&header.version, &header.alg, bytes, &key)?;
