@@ -74,7 +74,7 @@ pub(crate) struct Ciphertext(Vec<u8>);
 pub(crate) fn decrypt(
     version: &EncVersion,
     alg: &EncAlg,
-    ciphertext: Bytes,
+    ciphertext: &mut Bytes,
     key: &[u8],
 ) -> Result<Bytes, CryptrError> {
     match version {
@@ -129,7 +129,7 @@ pub(crate) fn decrypt_stream(
 }
 
 #[inline]
-fn decrypt_chacha_v1(mut ciphertext: Bytes, key: &[u8]) -> Result<Bytes, CryptrError> {
+fn decrypt_chacha_v1(ciphertext: &mut Bytes, key: &[u8]) -> Result<Bytes, CryptrError> {
     let k = Key::from_slice(key);
     let cipher = ChaCha20Poly1305::new(k);
     // 96 bits nonce is always the first bytes
