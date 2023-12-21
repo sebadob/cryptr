@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.1
+
+Add pre-built binaries to `.gitignore` again to not push them to crates.io
+
 ## v0.2.0
 
 - pre-built binaries will be added to the repo with each version
