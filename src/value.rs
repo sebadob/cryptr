@@ -933,7 +933,7 @@ mod tests {
     #[tokio::test]
     async fn test_value_encrypt_decrypt_with_key() {
         let _ = EncKeys::generate_multiple(2).unwrap().init();
-        let active = EncKeys::get_static().unwrap().enc_key_active.clone();
+        let active = EncKeys::get_static().enc_key_active.clone();
 
         let orig = "my plain value 123";
         let value = EncValue::encrypt_with_key_id(orig.as_bytes(), active).unwrap();
