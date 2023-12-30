@@ -2,8 +2,8 @@
 
 ## v0.2.2
 
-This fixes the build on Windows systems, which would fail before because reading the filesize
-inside the `FileReader` was Unix specific.
+Make it compile on Windows systems with `cli` or `streaming` features.
+The before implementation for reading the filesize in `FileReader` was unix specific.
 
 ## v0.2.1
 
