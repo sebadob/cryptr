@@ -41,12 +41,12 @@ build:
     #!/usr/bin/env bash
     set -euxo pipefail
     # build as musl to make sure this works
-    cargo build --release --target x86_64-unknown-linux-musl
+    cargo build --features cli --release --target x86_64-unknown-linux-musl
     cp target/x86_64-unknown-linux-musl/release/cryptr out/cryptr_{{TAG}}
 
     # this needs mingw32 to be installed:
     # sudo dnf install mingw32-gcc mingw64-gcc  -y
-    cargo build --release --target x86_64-pc-windows-gnu
+    cargo build --features cli --release --target x86_64-pc-windows-gnu
     cp target/x86_64-pc-windows-gnu/release/cryptr.exe out/cryptr_{{TAG}}.exe
 
     #git add out/*
@@ -92,4 +92,8 @@ release: verfiy-is-clean
 publish: verfiy-is-clean
     #!/usr/bin/env bash
     set -euxo pipefail
+
+    # We must delete the pre-built binaries to not push them to crates.io
+    rm -rf out/*
+
     cargo publish

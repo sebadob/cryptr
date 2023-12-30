@@ -2,12 +2,14 @@ use crate::encryption::ChunkSizeKb;
 use crate::stream::EncStreamReader;
 use crate::stream::{LastStreamElement, StreamChunk};
 use crate::value::EncValueHeader;
+use crate::CryptrError;
 use async_trait::async_trait;
+use filesize::PathExt;
 use flume::Sender;
 use futures::channel::oneshot;
 use std::fmt::Formatter;
 use std::io::SeekFrom;
-use std::os::unix::fs::MetadataExt;
+use std::path::Path;
 use std::time::Duration;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -16,7 +18,6 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio::{sync, time};
 use tracing::debug;
-use crate::CryptrError;
 
 /// Streaming FileReader
 ///
@@ -40,8 +41,8 @@ impl EncStreamReader for FileReader<'_> {
     ) -> Result<JoinHandle<Result<(), CryptrError>>, CryptrError> {
         let mut f = File::open(&self.path).await.unwrap();
 
-        let meta = f.metadata().await.expect("Reading file metadata");
-        let filesize = meta.size();
+        let path = Path::new(&self.path);
+        let filesize = path.size_on_disk()?;
 
         let mut chunk_size = chunk_size.value_bytes() as u64;
         // This is an optimization for small values.
@@ -110,8 +111,8 @@ impl EncStreamReader for FileReader<'_> {
         // initialize the streaming manager
         tx_init.send((header, nonce)).unwrap();
 
-        let meta = file.metadata().await.expect("Reading file metadata");
-        let filesize = meta.size();
+        let path = Path::new(&self.path);
+        let filesize = path.size_on_disk()?;
         let payload_len = filesize - payload_offset;
 
         file.seek(SeekFrom::Start(payload_offset)).await?;

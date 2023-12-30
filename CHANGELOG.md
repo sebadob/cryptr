@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.2
+
+This fixes the build on Windows systems, which would fail before because reading the filesize
+inside the `FileReader` was Unix specific.
+
 ## v0.2.1
 
 Add pre-built binaries to `.gitignore` again to not push them to crates.io
