@@ -6,6 +6,8 @@ mod cli;
 #[tokio::main]
 async fn main() -> Result<(), CryptrError> {
     #[cfg(feature = "cli")]
-    cli::run().await?;
+    if let Err(err) = cli::run().await {
+        eprintln!("{}", err.as_str());
+    }
     Ok(())
 }

@@ -65,7 +65,7 @@ pub enum CryptrError {
 
 impl CryptrError {
     #[allow(dead_code)]
-    fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         match self {
             CryptrError::Cli(err) => err.as_str(),
             CryptrError::Config(err) => err,

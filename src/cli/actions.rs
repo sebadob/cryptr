@@ -78,6 +78,9 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
                     }
                     Some(split) => split,
                 };
+                if object.is_empty() {
+                    return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
+                }
 
                 reader_credentials = config.s3_config.credentials();
                 reader_bucket = Some(config.s3_config.bucket(bucket_name.to_string())?);
@@ -125,9 +128,13 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
                     }
                     Some(split) => split,
                 };
+                if object.is_empty() {
+                    return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
+                }
 
                 writer_credentials = config.s3_config.credentials();
                 writer_bucket = Some(config.s3_config.bucket(bucket_name.to_string())?);
+
                 StreamWriter::S3(S3Writer {
                     credentials: writer_credentials.as_ref(),
                     bucket: writer_bucket.as_ref().unwrap(),
