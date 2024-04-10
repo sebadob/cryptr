@@ -127,4 +127,4 @@ publish-dry: verfiy-is-clean
     # We must delete the pre-built binaries to not push them to crates.io
     rm -rf out/*
 
-    cargo publish
+    cargo publish --dry-run
