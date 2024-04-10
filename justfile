@@ -101,9 +101,6 @@ release: verfiy-is-clean build-binaries
     #!/usr/bin/env bash
     set -euxo pipefail
 
-    # make sure git is clean
-    git diff --quiet || exit 1
-
     git tag "v$TAG"
     git push origin "v$TAG"
 
