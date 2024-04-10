@@ -51,14 +51,25 @@ build:
     set -euxo pipefail
     # build as musl to make sure this works
     cargo build --features cli --release --target x86_64-unknown-linux-musl
-    cp target/x86_64-unknown-linux-musl/release/cryptr out/cryptr_{{TAG}}
 
     # this needs mingw32 to be installed:
     # sudo dnf install mingw32-gcc mingw64-gcc  -y
     cargo build --features cli --release --target x86_64-pc-windows-gnu
-    cp target/x86_64-pc-windows-gnu/release/cryptr.exe out/cryptr_{{TAG}}.exe
 
     #git add out/*
+
+
+# builds binaries
+build-binaries: build
+    #!/usr/bin/env bash
+    set -euxo pipefail
+    mkdir out
+
+    cp target/x86_64-unknown-linux-musl/release/cryptr out/cryptr_{{TAG}}
+    cp target/x86_64-pc-windows-gnu/release/cryptr.exe out/cryptr_{{TAG}}.exe
+
+    git add out/*
+
 
 # verifies the MSRV
 msrv-verify:
@@ -86,7 +97,7 @@ verfiy-is-clean: verify
 
 
 # sets a new git tag and pushes it
-release: verfiy-is-clean
+release: verfiy-is-clean build-binaries
     #!/usr/bin/env bash
     set -euxo pipefail
 
@@ -99,6 +110,17 @@ release: verfiy-is-clean
 
 # publishes the current version to cargo.io
 publish: verfiy-is-clean
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    # We must delete the pre-built binaries to not push them to crates.io
+    rm -rf out/*
+
+    cargo publish
+
+
+# dry run for publishing to crates.io
+publish-dry: verfiy-is-clean
     #!/usr/bin/env bash
     set -euxo pipefail
 
