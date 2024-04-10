@@ -63,7 +63,6 @@ build:
 build-binaries: build
     #!/usr/bin/env bash
     set -euxo pipefail
-    mkdir out
 
     cp target/x86_64-unknown-linux-musl/release/cryptr out/cryptr_{{TAG}}
     cp target/x86_64-pc-windows-gnu/release/cryptr.exe out/cryptr_{{TAG}}.exe
