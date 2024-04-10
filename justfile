@@ -63,12 +63,11 @@ build:
 build-binaries: build
     #!/usr/bin/env bash
     set -euxo pipefail
-    mkdir out
 
     cp target/x86_64-unknown-linux-musl/release/cryptr out/cryptr_{{TAG}}
     cp target/x86_64-pc-windows-gnu/release/cryptr.exe out/cryptr_{{TAG}}.exe
 
-    git add out/*
+    git add -f out/*
 
 
 # verifies the MSRV
@@ -100,9 +99,6 @@ verfiy-is-clean: verify
 release: verfiy-is-clean build-binaries
     #!/usr/bin/env bash
     set -euxo pipefail
-
-    # make sure git is clean
-    git diff --quiet || exit 1
 
     git tag "v$TAG"
     git push origin "v$TAG"
