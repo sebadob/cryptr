@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.0
+
+- fix an offset bug in the `S3Reader` which would cause an in-flight decryption to
+  fail on the last chunk
+- optimized the performance of the `S3Reader`
+- cleaner error logging when using the CLI
+- bump external dependencies
+
 ## v0.2.2
 
 Make it compile on Windows systems with `cli` or `streaming` features.

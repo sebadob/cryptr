@@ -151,7 +151,7 @@ impl EncValueHeader {
 
         let mut buf = Bytes::from(buf.to_vec());
         let header = Self::try_extract(&mut buf)?;
-        // lets make sure, that it was encrypted with streaming
+        // let's make sure, that it was encrypted with streaming
         if header.chunk_size.value() == 0 {
             // TODO automatically switch to in-memory decryption here?
             return Err(CryptrError::HeaderInvalid(

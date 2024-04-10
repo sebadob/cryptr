@@ -68,6 +68,8 @@ impl ChunkSizeKb {
     }
 }
 
+// this is not really dead code, will be used in each feature
+#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct Ciphertext(Vec<u8>);
 

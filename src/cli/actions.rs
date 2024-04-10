@@ -78,6 +78,9 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
                     }
                     Some(split) => split,
                 };
+                if object.is_empty() {
+                    return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
+                }
 
                 reader_credentials = config.s3_config.credentials();
                 reader_bucket = Some(config.s3_config.bucket(bucket_name.to_string())?);
@@ -125,9 +128,13 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
                     }
                     Some(split) => split,
                 };
+                if object.is_empty() {
+                    return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
+                }
 
                 writer_credentials = config.s3_config.credentials();
                 writer_bucket = Some(config.s3_config.bucket(bucket_name.to_string())?);
+
                 StreamWriter::S3(S3Writer {
                     credentials: writer_credentials.as_ref(),
                     bucket: writer_bucket.as_ref().unwrap(),
@@ -310,7 +317,7 @@ pub async fn export_keys(args: ArgsKeysExport) -> Result<(), CryptrError> {
                     active_id
                 );
 
-                keys.enc_key_active = active_id.clone();
+                keys.enc_key_active.clone_from(active_id);
             } else {
                 // multiple keys in export -> the user must select the new active key
                 println!(
@@ -335,7 +342,7 @@ pub async fn export_keys(args: ArgsKeysExport) -> Result<(), CryptrError> {
                             let idx = num - 1;
                             if (0..keys_len).contains(&idx) {
                                 let (active_id, _) = keys.enc_keys.get(idx).unwrap();
-                                keys.enc_key_active = active_id.clone();
+                                keys.enc_key_active.clone_from(active_id);
                                 break;
                             }
                         }

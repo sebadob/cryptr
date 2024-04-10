@@ -5,9 +5,9 @@ use futures::channel::oneshot;
 use std::fmt::{Debug, Formatter};
 use tokio::task::JoinHandle;
 
+use crate::CryptrError;
 #[cfg(feature = "s3")]
 use std::time::Duration;
-use crate::CryptrError;
 
 pub mod reader;
 pub mod writer;
@@ -20,7 +20,6 @@ pub fn http_client() -> reqwest::Client {
         .user_agent(format!("cryptr v{}", crate::APP_VERSION))
         .min_tls_version(reqwest::tls::Version::TLS_1_3)
         .pool_idle_timeout(Duration::from_secs(600))
-        .http2_keep_alive_while_idle(true)
         .build()
         .unwrap()
 }
@@ -33,7 +32,6 @@ pub fn http_client_insecure() -> reqwest::Client {
         .user_agent(format!("cryptr v{}", crate::APP_VERSION))
         .min_tls_version(reqwest::tls::Version::TLS_1_2)
         .pool_idle_timeout(Duration::from_secs(600))
-        .http2_keep_alive_while_idle(true)
         .danger_accept_invalid_certs(true)
         .build()
         .unwrap()
