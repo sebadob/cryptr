@@ -5,4 +5,4 @@ target
 /.env
 /.idea
 out
-./minio_data
+minio_data
