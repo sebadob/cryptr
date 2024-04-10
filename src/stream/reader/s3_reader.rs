@@ -3,6 +3,7 @@ use crate::stream::{
     http_client, http_client_insecure, EncStreamReader, LastStreamElement, StreamChunk,
 };
 use crate::value::EncValueHeader;
+use crate::CryptrError;
 use async_trait::async_trait;
 use bytes::BytesMut;
 use flume::Sender;
@@ -18,7 +19,6 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio::{sync, time};
 use tracing::{debug, error};
-use crate::CryptrError;
 
 const SIGN_DUR: Duration = Duration::from_secs(600);
 
@@ -119,7 +119,8 @@ impl EncStreamReader for S3Reader<'_> {
                         // we have at least one more element
                         if res.is_err() {
                             debug!("stream rest in loop error: {:?}", res);
-                            tx.send_async(Err(CryptrError::S3(format!("{:?}", res)))).await?;
+                            tx.send_async(Err(CryptrError::S3(format!("{:?}", res))))
+                                .await?;
                             return Err(CryptrError::S3(format!("{:?}", res)));
                         }
                     }
@@ -253,26 +254,22 @@ impl EncStreamReader for S3Reader<'_> {
 
                 data = stream.next().await;
 
-                // await the next chunk
-                match &data {
-                    None => {
-                        // the element before was the last one
-                        debug!("sending last element with len: {}", buf.len());
-                        tx.send_async(Ok((LastStreamElement::Yes, StreamChunk(buf.to_vec()))))
-                            .await?;
-                        break;
-                    }
+                // check the next chunk
+                let is_stream_empty = match &data {
+                    None => true,
                     Some(res) => {
                         if res.is_err() {
                             debug!("stream rest in loop error: {:?}", res);
-                            tx.send_async(Err(CryptrError::S3(format!("{:?}", res)))).await?;
+                            tx.send_async(Err(CryptrError::S3(format!("{:?}", res))))
+                                .await?;
                             return Err(CryptrError::S3(format!("{:?}", res)));
                         }
+                        false
                     }
-                }
+                };
 
                 // if the buffer has enough data to extract the next encrypted chunk
-                if buf.len() > chunk_size {
+                while buf.len() > chunk_size {
                     let bytes = buf.split_to(chunk_size);
                     debug!(
                         "sending non-last chunk with len: {} with data left in buf: {}",
@@ -281,6 +278,13 @@ impl EncStreamReader for S3Reader<'_> {
                     );
                     tx.send_async(Ok((LastStreamElement::No, StreamChunk(bytes.to_vec()))))
                         .await?;
+                }
+
+                if is_stream_empty {
+                    debug!("sending last element with len: {}", buf.len());
+                    tx.send_async(Ok((LastStreamElement::Yes, StreamChunk(buf.to_vec()))))
+                        .await?;
+                    break;
                 }
             }
 
