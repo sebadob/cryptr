@@ -111,7 +111,7 @@ impl EncKeys {
         Self::validate_id(&id, Some(self))?;
 
         let key = secure_random_vec(32)?;
-        self.enc_key_active = id.clone();
+        self.enc_key_active.clone_from(&id);
         self.enc_keys.push((id, key));
 
         Ok(())
