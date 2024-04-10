@@ -68,7 +68,7 @@ build-binaries: build
     cp target/x86_64-unknown-linux-musl/release/cryptr out/cryptr_{{TAG}}
     cp target/x86_64-pc-windows-gnu/release/cryptr.exe out/cryptr_{{TAG}}.exe
 
-    git add out/*
+    git add -f out/*
 
 
 # verifies the MSRV
