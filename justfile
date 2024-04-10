@@ -28,12 +28,21 @@ check:
     cargo minimal-versions check
 
 
-# runs the full set of tests
+# runs tests without s3
 test:
     #!/usr/bin/env bash
     set -euxo pipefail
     clear
     cargo test
+
+
+# runs the full set of tests
+test-full:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+    clear
+    cargo test
+    cargo test -- --ignored
 
 
 # builds the code
@@ -62,7 +71,7 @@ msrv-find:
 
 
 # verify thats everything is good
-verify: check test build msrv-verify
+verify: check test-full build msrv-verify
 
 
 # makes sure everything is fine
