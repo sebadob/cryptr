@@ -1,8 +1,9 @@
 # Changelog
 
-## v0.3.1
+## v0.4.0
 
 - fix a misleading error message if a given encryption key is not exactly 32 bytes long
+- MSRV has been bumped to `1.72.1`
 
 ## v0.3.0
 
