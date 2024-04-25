@@ -1,8 +1,8 @@
 [package]
 name = "cryptr"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
-rust-version = "1.70.0"
+rust-version = "1.72.1"
 license = "Apache-2.0"
 authors = ["Sebastian Dobe <sebastiandobe@mailbox.org"]
 categories = ["command-line-utilities", "cryptography", "data-structures"]
