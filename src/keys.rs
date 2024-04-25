@@ -223,7 +223,7 @@ impl EncKeys {
                 let key_bytes = b64_decode(key_raw)?;
                 if key_bytes.len() != 32 {
                     return Err(CryptrError::Keys(
-                        "The IDs for ENC_KEYS must match '^[a-zA-Z0-9_-]{2,20}$'",
+                        "An encryption key must be exactly 32 bytes long",
                     ));
                 }
 
