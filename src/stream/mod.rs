@@ -6,36 +6,14 @@ use std::fmt::{Debug, Formatter};
 use tokio::task::JoinHandle;
 
 use crate::CryptrError;
+
 #[cfg(feature = "s3")]
-use std::time::Duration;
+pub mod s3 {
+    pub use s3_simple::*;
+}
 
 pub mod reader;
 pub mod writer;
-
-#[cfg(feature = "s3")]
-pub fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(10))
-        .user_agent(format!("cryptr v{}", crate::APP_VERSION))
-        .min_tls_version(reqwest::tls::Version::TLS_1_3)
-        .pool_idle_timeout(Duration::from_secs(600))
-        .build()
-        .unwrap()
-}
-
-#[cfg(feature = "s3")]
-pub fn http_client_insecure() -> reqwest::Client {
-    reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(10))
-        .user_agent(format!("cryptr v{}", crate::APP_VERSION))
-        .min_tls_version(reqwest::tls::Version::TLS_1_2)
-        .pool_idle_timeout(Duration::from_secs(600))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .unwrap()
-}
 
 /// Marks the last element of a stream
 #[derive(Debug, PartialEq)]
