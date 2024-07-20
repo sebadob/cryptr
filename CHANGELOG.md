@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.0
+
+An internal migration from `rusty_s3` to `s3-simple` for S3 requests has been done.
+This brings additional compatibility with for instance [Garage](https://garagehq.deuxfleurs.fr/)
+and gets rid of pre-signed URLs in favor of signed headers, which is a more secure approach.
+
 ## v0.4.0
 
 - fix a misleading error message if a given encryption key is not exactly 32 bytes long
