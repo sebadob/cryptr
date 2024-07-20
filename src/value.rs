@@ -652,6 +652,7 @@ mod tests {
     use crate::stream::writer::memory_writer::MemoryWriter;
     use crate::stream::writer::s3_writer::S3Writer;
     use rstest::*;
+    use s3_simple::*;
     use std::env;
 
     #[test]
@@ -861,31 +862,30 @@ mod tests {
             print_progress: false,
         });
 
-        let creds = rusty_s3::Credentials::new(
+        let creds = Credentials::new(
             env::var("S3_KEY").expect("S3_KEY"),
             env::var("S3_SECRET").expect("S3_SECRET"),
         );
         let s3_url = env::var("S3_URL").expect("S3_URL").parse().unwrap();
         let bucket_name = env::var("S3_BUCKET").expect("S3_BUCKET");
-        let region = env::var("S3_REGION").expect("S3_REGION");
+        let region = Region(env::var("S3_REGION").expect("S3_REGION"));
+        let options = Some(BucketOptions {
+            path_style: true,
+            list_objects_v2: false,
+        });
 
-        let bucket =
-            rusty_s3::Bucket::new(s3_url, rusty_s3::UrlStyle::Path, bucket_name, region).unwrap();
+        let bucket = Bucket::new(s3_url, bucket_name, region, creds, options).unwrap();
         let writer = StreamWriter::S3(S3Writer {
-            credentials: Some(&creds),
             bucket: &bucket,
             object: &target,
-            danger_accept_invalid_certs: true,
         });
 
         EncValue::encrypt_stream(reader, writer).await.unwrap();
 
         // decrypt
         let reader = StreamReader::S3(S3Reader {
-            credentials: Some(&creds),
             bucket: &bucket,
             object: &target,
-            danger_accept_invalid_certs: true,
             print_progress: false,
         });
         let writer = StreamWriter::File(FileWriter {

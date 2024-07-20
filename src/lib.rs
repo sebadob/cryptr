@@ -82,6 +82,12 @@ impl CryptrError {
     }
 }
 
+impl From<CryptrError> for std::io::Error {
+    fn from(value: CryptrError) -> Self {
+        Self::new(std::io::ErrorKind::Other, value.to_string())
+    }
+}
+
 impl From<std::io::Error> for CryptrError {
     fn from(value: Error) -> Self {
         Self::Generic(value.to_string())
@@ -133,6 +139,13 @@ impl From<rand::Error> for CryptrError {
 impl From<reqwest::Error> for CryptrError {
     fn from(value: reqwest::Error) -> Self {
         Self::Generic(value.to_string())
+    }
+}
+
+#[cfg(feature = "s3")]
+impl From<s3_simple::S3Error> for CryptrError {
+    fn from(value: s3_simple::S3Error) -> Self {
+        Self::S3(value.to_string())
     }
 }
 

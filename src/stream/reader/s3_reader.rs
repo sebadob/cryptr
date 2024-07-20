@@ -1,7 +1,5 @@
 use crate::encryption::ChunkSizeKb;
-use crate::stream::{
-    http_client, http_client_insecure, EncStreamReader, LastStreamElement, StreamChunk,
-};
+use crate::stream::{EncStreamReader, LastStreamElement, StreamChunk};
 use crate::value::EncValueHeader;
 use crate::CryptrError;
 use async_trait::async_trait;
@@ -9,9 +7,7 @@ use bytes::BytesMut;
 use flume::Sender;
 use futures::channel::oneshot;
 use futures::{pin_mut, StreamExt};
-use reqwest::header::CONTENT_LENGTH;
-use rusty_s3::actions::{GetObject, HeadObject};
-use rusty_s3::{Bucket, Credentials, S3Action};
+use s3_simple::Bucket;
 use std::fmt::Formatter;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -20,17 +16,13 @@ use tokio::time::Instant;
 use tokio::{sync, time};
 use tracing::{debug, error};
 
-const SIGN_DUR: Duration = Duration::from_secs(600);
-
 /// Streaming S3 object storage Reader
 ///
 /// This is available with feature `s3` only
 #[derive(Debug)]
 pub struct S3Reader<'a> {
-    pub credentials: Option<&'a Credentials>,
     pub bucket: &'a Bucket,
     pub object: &'a str,
-    pub danger_accept_invalid_certs: bool,
     pub print_progress: bool,
 }
 
@@ -39,10 +31,8 @@ impl EncStreamReader for S3Reader<'_> {
     fn debug_reader(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "S3Reader(Bucket: {}, Object: {}, danger_accept_invalid_certs: {})",
-            self.bucket.name(),
-            self.object,
-            self.danger_accept_invalid_certs,
+            "S3Reader(Bucket: {}, Object: {})",
+            self.bucket.name, self.object,
         )
     }
 
@@ -52,32 +42,19 @@ impl EncStreamReader for S3Reader<'_> {
         chunk_size: ChunkSizeKb,
         tx: Sender<Result<(LastStreamElement, StreamChunk), CryptrError>>,
     ) -> Result<JoinHandle<Result<(), CryptrError>>, CryptrError> {
-        let client = if self.danger_accept_invalid_certs {
-            http_client_insecure()
-        } else {
-            http_client()
-        };
-
         // get the content length of the remote object first
-        let action = HeadObject::new(self.bucket, self.credentials, self.object);
-        let signed_url = action.sign(SIGN_DUR);
-        let resp = client.head(signed_url).send().await?;
-        let content_length = resp
-            .headers()
-            .get(CONTENT_LENGTH)
-            .map(|h| h.to_str().unwrap_or_default())
-            .unwrap_or_default()
-            .parse::<usize>()
-            .unwrap_or_default();
+        let head = self.bucket.head(self.object).await?;
+        let content_length = head
+            .content_length
+            .map(|c| c as usize)
+            .unwrap_or(usize::MAX);
 
         // progress printer
         let tx_progress =
             Self::spawn_progress(self.print_progress, self.object, content_length).await;
 
         // now get the object itself
-        let action = GetObject::new(self.bucket, self.credentials, self.object);
-        let signed_url = action.sign(SIGN_DUR);
-        let resp = client.get(signed_url).send().await?;
+        let resp = self.bucket.get(self.object).await?;
         debug!("resp: {:?}", resp);
 
         let handle = tokio::spawn(async move {
@@ -152,32 +129,19 @@ impl EncStreamReader for S3Reader<'_> {
         tx_init: oneshot::Sender<(EncValueHeader, Vec<u8>)>,
         tx: Sender<Result<(LastStreamElement, StreamChunk), CryptrError>>,
     ) -> Result<JoinHandle<Result<(), CryptrError>>, CryptrError> {
-        let client = if self.danger_accept_invalid_certs {
-            http_client_insecure()
-        } else {
-            http_client()
-        };
-
         // get the content length of the remote object first
-        let action = HeadObject::new(self.bucket, self.credentials, self.object);
-        let signed_url = action.sign(SIGN_DUR);
-        let resp = client.head(signed_url).send().await?;
-        let content_length = resp
-            .headers()
-            .get(CONTENT_LENGTH)
-            .map(|h| h.to_str().unwrap_or_default())
-            .unwrap_or_default()
-            .parse::<usize>()
-            .unwrap_or_default();
+        let head = self.bucket.head(self.object).await?;
+        let content_length = head
+            .content_length
+            .map(|c| c as usize)
+            .unwrap_or(usize::MAX);
 
         // progress printer
         let tx_progress =
             Self::spawn_progress(self.print_progress, self.object, content_length).await;
 
         // now get the object itself
-        let action = GetObject::new(self.bucket, self.credentials, self.object);
-        let signed_url = action.sign(SIGN_DUR);
-        let resp = client.get(signed_url).send().await?;
+        let resp = self.bucket.get(self.object).await?;
 
         // we need this small trick to be able to use the oneshot channel inside the loop
         let (tx_init_internal, rx_init) = flume::unbounded();
