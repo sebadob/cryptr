@@ -2,13 +2,13 @@
 
 ## v0.5.1
 
-Adds pub re-exports of the `s3-simple` API with `s3` feature enabled. 
+Adds pub re-exports of the `s3-simple` API with `s3` feature enabled.
 This is now reachable via `cryptr::stream::s3::*` to be able to create
 `s3` readers and writers again.
 
 ## v0.5.0
 
-An internal migration from `rusty_s3` to `s3-simple` for S3 requests has been done.
+A migration from `rusty_s3` to `s3-simple` for S3 requests has been done.
 This brings additional compatibility with for instance [Garage](https://garagehq.deuxfleurs.fr/)
 and gets rid of pre-signed URLs in favor of signed headers, which is a more secure approach.
 
