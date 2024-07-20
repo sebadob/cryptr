@@ -42,7 +42,7 @@ test-full:
     set -euxo pipefail
     clear
     cargo test
-    cargo test -- --ignored
+    cargo test test_file_to_s3_to_file -- --ignored
 
 
 # builds the code
