@@ -1,8 +1,8 @@
 use crate::cli::actions::Action;
 use crate::cli::args::{Args, ArgsKeys, ArgsKeysConvert, ArgsS3};
 use clap::Parser;
-use tracing::debug;
 use cryptr::CryptrError;
+use tracing::debug;
 
 mod actions;
 mod args;
@@ -35,7 +35,7 @@ pub async fn run() -> Result<(), CryptrError> {
         Args::S3(args) => match args {
             ArgsS3::Show => actions::s3_show().await?,
             ArgsS3::Update => actions::s3_update().await?,
-            ArgsS3::List(args) => actions::s3_list_buckets(args).await?,
+            ArgsS3::List(args) => actions::s3_list(args).await?,
         },
     }
 

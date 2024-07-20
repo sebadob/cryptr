@@ -1,10 +1,10 @@
-use std::time::Duration;
-
+use crate::cli::args::{
+    ArgsEncryptDecrypt, ArgsKeysExport, ArgsKeysImport, ArgsKeysList, ArgsKeysNew, ArgsS3List,
+};
+use crate::cli::config::EncConfig;
+use crate::cli::utils;
+use crate::cli::utils::PromptPassword;
 use colored::Colorize;
-use reqwest::Url;
-use rusty_s3::actions::ListObjectsV2;
-use rusty_s3::S3Action;
-
 use cryptr::keys::{EncKeys, EncKeysSealed};
 use cryptr::stream::reader::file_reader::FileReader;
 use cryptr::stream::reader::memory_reader::MemoryReader;
@@ -14,17 +14,10 @@ use cryptr::stream::writer::file_writer::FileWriter;
 use cryptr::stream::writer::memory_writer::MemoryWriter;
 use cryptr::stream::writer::s3_writer::S3Writer;
 use cryptr::stream::writer::StreamWriter;
-use cryptr::stream::{http_client, http_client_insecure};
 use cryptr::utils::{b64_decode, b64_encode};
 use cryptr::value::EncValue;
 use cryptr::CryptrError;
-
-use crate::cli::args::{
-    ArgsEncryptDecrypt, ArgsKeysExport, ArgsKeysImport, ArgsKeysList, ArgsKeysNew, ArgsS3List,
-};
-use crate::cli::config::EncConfig;
-use crate::cli::utils;
-use crate::cli::utils::PromptPassword;
+use reqwest::Url;
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Action {
@@ -38,8 +31,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
     config.enc_keys.init()?;
 
     // these 2 are a workaround for lifetime issues
-    let mut reader_bucket = None;
-    let mut reader_credentials = None;
+    let mut bucket_reader = None;
 
     let reader = match &args.from {
         None => {
@@ -82,13 +74,10 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
                     return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
                 }
 
-                reader_credentials = config.s3_config.credentials();
-                reader_bucket = Some(config.s3_config.bucket(bucket_name.to_string())?);
+                bucket_reader = Some(config.s3_config.bucket(bucket_name.to_string())?);
                 StreamReader::S3(S3Reader {
-                    credentials: reader_credentials.as_ref(),
-                    bucket: reader_bucket.as_ref().unwrap(),
+                    bucket: bucket_reader.as_ref().unwrap(),
                     object,
-                    danger_accept_invalid_certs: args.insecure,
                     print_progress: args.show_progress,
                 })
             } else {
@@ -102,9 +91,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
 
     // these 2 are a workaround for lifetime issues
     #[allow(unused_variables)]
-    let writer_bucket;
-    #[allow(unused_variables)]
-    let writer_credentials;
+    let bucket_writer;
 
     let writer = match &args.to {
         None => StreamWriter::Memory(MemoryWriter(&mut writer_memory_buf)),
@@ -132,14 +119,11 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
                     return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
                 }
 
-                writer_credentials = config.s3_config.credentials();
-                writer_bucket = Some(config.s3_config.bucket(bucket_name.to_string())?);
+                bucket_writer = Some(config.s3_config.bucket(bucket_name.to_string())?);
 
                 StreamWriter::S3(S3Writer {
-                    credentials: writer_credentials.as_ref(),
-                    bucket: writer_bucket.as_ref().unwrap(),
+                    bucket: bucket_writer.as_ref().unwrap(),
                     object,
-                    danger_accept_invalid_certs: args.insecure,
                 })
             } else {
                 eprintln!("Unknown prefix format: {}", prefix);
@@ -621,7 +605,7 @@ pub async fn s3_update() -> Result<(), CryptrError> {
     Ok(())
 }
 
-pub async fn s3_list_buckets(args: ArgsS3List) -> Result<(), CryptrError> {
+pub async fn s3_list(args: ArgsS3List) -> Result<(), CryptrError> {
     let config = match EncConfig::read().await {
         Ok(config) => config,
         Err(_) => {
@@ -630,20 +614,21 @@ pub async fn s3_list_buckets(args: ArgsS3List) -> Result<(), CryptrError> {
     };
 
     let bucket = config.s3_config.bucket(args.bucket)?;
-    let creds = config.s3_config.credentials();
-    let action = ListObjectsV2::new(&bucket, creds.as_ref());
-    let url = action.sign(Duration::from_secs(60));
-    let client = if args.insecure {
-        http_client_insecure()
-    } else {
-        http_client()
-    };
-    let res = client.get(url).send().await?;
+    let res = bucket.list("", None).await?;
+    // let creds = config.s3_config.credentials();
+    // let action = ListObjectsV2::new(&bucket, creds.as_ref());
+    // let url = action.sign(Duration::from_secs(60));
+    // let client = if args.insecure {
+    //     http_client_insecure()
+    // } else {
+    //     http_client()
+    // };
+    // let res = client.get(url).send().await?;
 
-    let body = res.text().await?;
-    let parsed =
-        ListObjectsV2::parse_response(&body).map_err(|err| CryptrError::S3(err.to_string()))?;
-    println!("{:#?}", parsed);
+    // let body = res.text().await?;
+    // let parsed =
+    //     ListObjectsV2::parse_response(&body).map_err(|err| CryptrError::S3(err.to_string()))?;
+    println!("{:#?}", res);
 
     Ok(())
 }

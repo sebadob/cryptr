@@ -1,6 +1,6 @@
 use cryptr::keys::EncKeys;
 use cryptr::CryptrError;
-use rusty_s3::{Bucket, Credentials, UrlStyle};
+use s3_simple::{AccessKeyId, AccessKeySecret, Bucket, BucketOptions, Credentials, Region};
 use std::env;
 use std::fmt::{Display, Formatter};
 use tokio::fs;
@@ -47,26 +47,22 @@ Access Secret:  <hidden>"#,
 }
 
 impl S3Config {
-    pub fn credentials(&self) -> Option<Credentials> {
-        if self.access_key.is_empty() || self.access_key.is_empty() {
-            None
-        } else {
-            Some(Credentials::new(&self.access_key, &self.access_secret))
-        }
-    }
-
     pub fn bucket(&self, name: String) -> Result<Bucket, CryptrError> {
         let url = self
             .url
             .parse()
             .map_err(|_| CryptrError::Generic("Cannot parse URL".to_string()))?;
-        let path_style = if self.path_style {
-            UrlStyle::Path
-        } else {
-            UrlStyle::VirtualHost
+        let region = Region(self.region.clone());
+        let credentials = Credentials {
+            access_key_id: AccessKeyId(self.access_key.clone()),
+            access_key_secret: AccessKeySecret(self.access_secret.clone()),
         };
+        let options = Some(BucketOptions {
+            path_style: self.path_style,
+            list_objects_v2: true,
+        });
 
-        let bucket = Bucket::new(url, path_style, name, self.region.to_string())
+        let bucket = Bucket::new(url, name, region, credentials, options)
             .map_err(|err| CryptrError::S3(err.to_string()))?;
 
         Ok(bucket)

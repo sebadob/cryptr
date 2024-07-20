@@ -1,35 +1,20 @@
-use crate::stream::{
-    http_client, http_client_insecure, EncStreamWriter, LastStreamElement, StreamChunk,
-};
-use async_trait::async_trait;
-use flume::Receiver;
-use reqwest::header::ETAG;
-use std::fmt::Formatter;
-use std::mem;
-use std::time::Duration;
-use tracing::{debug, info, warn};
-
+use crate::stream::{EncStreamWriter, LastStreamElement, StreamChunk};
 use crate::CryptrError;
-use rusty_s3::actions::{
-    AbortMultipartUpload, CompleteMultipartUpload, CreateMultipartUpload,
-    CreateMultipartUploadResponse, PutObject, UploadPart,
-};
-use rusty_s3::S3Action;
-pub use rusty_s3::{Bucket, Credentials, UrlStyle};
-
-// 8MiB * 10_000 max chunks = 80GiB for a single file
-const S3_CHUNK_SIZE: usize = 8 * 1024 * 1024;
-const SIGN_DUR: Duration = Duration::from_secs(600);
+use async_trait::async_trait;
+use bytes::Bytes;
+use flume::Receiver;
+use futures::pin_mut;
+use s3_simple::Bucket;
+use std::fmt::Formatter;
+use tracing::debug;
 
 /// Streaming S3 object storage Writer
 ///
 /// This is available with feature `s3` only
 #[derive(Debug)]
 pub struct S3Writer<'a> {
-    pub credentials: Option<&'a Credentials>,
     pub bucket: &'a Bucket,
     pub object: &'a str,
-    pub danger_accept_invalid_certs: bool,
 }
 
 #[async_trait]
@@ -37,10 +22,8 @@ impl EncStreamWriter for S3Writer<'_> {
     fn debug_writer(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "S3Writer(Bucket: {}, Object: {}, danger_accept_invalid_certs: {})",
-            self.bucket.name(),
-            self.object,
-            self.danger_accept_invalid_certs,
+            "S3Writer(Bucket: {}, Object: {})",
+            self.bucket.name, self.object,
         )
     }
 
@@ -48,181 +31,37 @@ impl EncStreamWriter for S3Writer<'_> {
         &mut self,
         rx: Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>,
     ) -> Result<(), CryptrError> {
-        let client = if self.danger_accept_invalid_certs {
-            http_client_insecure()
-        } else {
-            http_client()
-        };
-
-        let mut buf = Vec::with_capacity(S3_CHUNK_SIZE);
         let mut total = 0;
 
-        let mut multipart: Option<CreateMultipartUploadResponse> = None;
-        let mut multipart_counter = 0;
-        let mut etags = Vec::with_capacity(8);
+        let s = async_stream::stream! {
+            while let Ok(msg) = rx.recv_async().await {
+                match msg {
+                    Ok((is_last, data)) => {
+                        let payload = Bytes::from(data.0);
+                        total += payload.len();
+                        yield Ok(payload);
 
-        // loop until enough chunks to reach the minimum chunk size of S3_CHUNK_SIZE
-        while let Ok(Ok((is_last, data))) = rx.recv_async().await {
-            let payload = data.0;
-            total += payload.len();
-            buf.extend(payload);
-
-            if is_last == LastStreamElement::Yes {
-                debug!("Last payload received. Total bytes received: {}", total);
-                break;
+                        if is_last == LastStreamElement::Yes {
+                            debug!("Last payload received. Total bytes received: {}", total);
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        yield Err(err);
+                        break;
+                    }
+                }
             }
+        };
 
-            // check if we reached the minimum part size
-            if buf.len() >= S3_CHUNK_SIZE {
-                // if we don't have an upload id yet, create one
-                let upload_id = if let Some(multipart) = &multipart {
-                    multipart.upload_id()
-                } else {
-                    let action =
-                        CreateMultipartUpload::new(self.bucket, self.credentials, self.object);
-                    let url = action.sign(SIGN_DUR);
-                    let resp = client.post(url).send().await?;
-                    let body = resp.text().await?;
+        pin_mut!(s);
+        let mut reader = tokio_util::io::StreamReader::new(s);
 
-                    let resp = CreateMultipartUpload::parse_response(&body)
-                        .map_err(|err| CryptrError::S3(err.to_string()))?;
-                    debug!(
-                        "Multipart upload created with upload id {}",
-                        resp.upload_id()
-                    );
-
-                    multipart = Some(resp);
-                    multipart.as_ref().unwrap().upload_id()
-                };
-
-                // upload the part
-                multipart_counter += 1;
-                let mut body = Vec::with_capacity(S3_CHUNK_SIZE);
-                mem::swap(&mut body, &mut buf);
-                self.upload_part(&client, body, multipart_counter, upload_id, &mut etags)
-                    .await?;
-            }
-        }
-
-        if let Some(multipart) = &multipart {
-            // if we get here, we have an ongoing multipart upload, which we need to finish
-
-            // upload the last part
-            multipart_counter += 1;
-            self.upload_part(
-                &client,
-                buf,
-                multipart_counter,
-                multipart.upload_id(),
-                &mut etags,
-            )
+        self.bucket
+            .put_stream(&mut reader, self.object.to_string())
             .await?;
 
-            // complete and finish the upload
-            let action = CompleteMultipartUpload::new(
-                self.bucket,
-                self.credentials,
-                self.object,
-                multipart.upload_id(),
-                etags.iter().map(|etag| etag.as_str()),
-            );
-            let url = action.sign(SIGN_DUR);
-
-            let resp = client
-                .post(url)
-                .body(action.body())
-                .send()
-                .await?
-                .error_for_status()?;
-            let body = resp.text().await?;
-            info!("S3 multipart upload successful: {body}");
-        } else {
-            // In this case, our complete buffer is below the minimum chunk size -> do direct upload
-            let action = PutObject::new(self.bucket, self.credentials, self.object);
-            let url = action.sign(SIGN_DUR);
-            let resp = client.put(url).body(buf).send().await?;
-
-            if !resp.status().is_success() {
-                let body = resp.text().await?;
-                return Err(CryptrError::S3(body));
-            }
-            let body = resp.text().await?;
-
-            info!("S3 direct upload successful: {body}");
-        }
-
         debug!("Writer exiting: {} bytes received", total);
-        Ok(())
-    }
-}
-
-impl S3Writer<'_> {
-    async fn upload_part(
-        &self,
-        client: &reqwest::Client,
-        body: Vec<u8>,
-        part_number: u16,
-        upload_id: &str,
-        etags: &mut Vec<String>,
-    ) -> Result<(), CryptrError> {
-        // TODO impl etag calc on our side too?
-
-        let part_upload = UploadPart::new(
-            self.bucket,
-            self.credentials,
-            self.object,
-            part_number,
-            upload_id,
-        );
-        let url = part_upload.sign(SIGN_DUR);
-
-        match client.put(url).body(body).send().await {
-            Ok(resp) => {
-                if !resp.status().is_success() {
-                    self.try_abort_upload(client, upload_id).await?;
-                    let body = resp.text().await?;
-                    return Err(CryptrError::S3(body));
-                }
-
-                let etag = match resp.headers().get(ETAG) {
-                    None => {
-                        return Err(CryptrError::S3(
-                            "Did not receive an ETAG from S3 stroage".to_string(),
-                        ))
-                    }
-                    Some(value) => match value.to_str() {
-                        Ok(etag) => etag,
-                        Err(err) => {
-                            return Err(CryptrError::S3(err.to_string()));
-                        }
-                    },
-                };
-
-                debug!("etag for part {}: {}", part_number, etag);
-                etags.push(etag.to_string());
-            }
-            Err(err) => {
-                self.try_abort_upload(client, upload_id).await?;
-                return Err(CryptrError::S3(err.to_string()));
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn try_abort_upload(
-        &self,
-        client: &reqwest::Client,
-        upload_id: &str,
-    ) -> Result<(), CryptrError> {
-        let action =
-            AbortMultipartUpload::new(self.bucket, self.credentials, self.object, upload_id);
-        let url = action.sign(SIGN_DUR);
-
-        let resp = client.post(url).send().await?.error_for_status()?;
-        let body = resp.text().await?;
-        warn!("S3 upload aborted: {body}");
-
         Ok(())
     }
 }
