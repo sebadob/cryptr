@@ -34,9 +34,6 @@ pub mod utils;
 /// Encryption Value
 pub mod value;
 
-#[cfg(feature = "s3")]
-pub(crate) const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
-
 #[derive(Debug, thiserror::Error)]
 pub enum CryptrError {
     #[error("CryptrError::Cli({0})")]
