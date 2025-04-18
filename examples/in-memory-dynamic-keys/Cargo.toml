@@ -7,4 +7,4 @@ edition = "2021"
 cryptr = { path = "../.." }
 
 anyhow = "1.0.75"
-tokio = { version = "1.35.0", features = ["rt-multi-thread"] }
+tokio = { version = "1.38.2", features = ["rt-multi-thread"] }
