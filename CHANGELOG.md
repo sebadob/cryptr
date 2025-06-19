@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.6.2
+
+Fixes a bug in `KdfValue::new_with_params()`, which ignored `m_cost`, `t_cost`, `p_cost` from the params and used the
+defaults all the time.
+
 ## v0.6.1
 
 2 new helper functions for `EncKeys` have been added, which provide more flexibility when they are handled manually or
