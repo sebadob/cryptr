@@ -49,9 +49,6 @@ impl KdfValue {
         format!("password${}${}${}", self.m_cost, self.t_cost, self.p_cost)
     }
 
-    /// Returns the correct enc key value for the EncKeyHeader
-    ///
-    /// Available with features `streaming` only
     #[cfg(feature = "streaming")]
     pub fn try_enc_key_to_params(enc_key_id: &str) -> Option<Params> {
         let (_, values) = enc_key_id.split_once("password$")?;
