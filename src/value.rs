@@ -544,6 +544,7 @@ impl EncValue {
             encryption::encrypt_stream(&version, &alg, rx_enc_to_stream, key, nonce, first_data)?;
 
         let reader_handle = match reader {
+            StreamReader::Channel(r) => r.spawn_reader_encryption(chunk_size_kb, tx_enc_to_stream),
             StreamReader::Memory(r) => r.spawn_reader_encryption(chunk_size_kb, tx_enc_to_stream),
             StreamReader::File(r) => r.spawn_reader_encryption(chunk_size_kb, tx_enc_to_stream),
             #[cfg(feature = "s3")]
@@ -553,6 +554,7 @@ impl EncValue {
 
         // start the writer
         match writer {
+            StreamWriter::Channel(mut w) => w.write(rx_enc_from_stream).await?,
             StreamWriter::Memory(mut w) => w.write(rx_enc_from_stream).await?,
             StreamWriter::File(mut w) => w.write(rx_enc_from_stream).await?,
             #[cfg(feature = "s3")]
@@ -604,6 +606,12 @@ impl EncValue {
         let (tx_to_decryptor, rx_to_decryptor) = flume::bounded(CHANNELS);
 
         let reader_handle = match reader {
+            StreamReader::Channel(_) => {
+                return Err(CryptrError::Decryption(
+                    "The ChannelReader makes no sense for in-memory decryption and has no \
+                    implementation for it. Use `MemoryReader` instead.",
+                ));
+            }
             StreamReader::Memory(r) => r.spawn_reader_decryption(tx_init, tx_to_decryptor),
             StreamReader::File(r) => r.spawn_reader_decryption(tx_init, tx_to_decryptor),
             #[cfg(feature = "s3")]
@@ -635,6 +643,7 @@ impl EncValue {
 
         // start the writer
         match writer {
+            StreamWriter::Channel(mut w) => w.write(rx_from_decryptor_to_writer).await?,
             StreamWriter::Memory(mut w) => w.write(rx_from_decryptor_to_writer).await?,
             StreamWriter::File(mut w) => w.write(rx_from_decryptor_to_writer).await?,
             #[cfg(feature = "s3")]
