@@ -81,7 +81,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
                     print_progress: args.show_progress,
                 })
             } else {
-                eprintln!("Unknown prefix format: {}", prefix);
+                eprintln!("Unknown prefix format: {prefix}");
                 return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
             }
         }
@@ -126,7 +126,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
                     object,
                 })
             } else {
-                eprintln!("Unknown prefix format: {}", prefix);
+                eprintln!("Unknown prefix format: {prefix}");
                 return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
             }
         }
@@ -168,11 +168,11 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
         match action {
             Action::Encrypt => {
                 let s = b64_encode(&writer_memory_buf);
-                println!("\nBase64 encoded encrypted secret:\n{}", s)
+                println!("\nBase64 encoded encrypted secret:\n{s}")
             }
             Action::Decrypt => {
                 let s = String::from_utf8_lossy(&writer_memory_buf);
-                println!("\nDecrypted plain text secret:\n{}", s)
+                println!("\nDecrypted plain text secret:\n{s}")
             }
         }
     }
@@ -187,10 +187,10 @@ pub async fn convert_legacy_key() -> Result<(), CryptrError> {
     let (cfg_value, secrets_value) = EncKeys::fmt_enc_keys_str_for_config(&converted);
 
     println!("\nConverted ENC_KEYS:\n");
-    println!("{}", cfg_value);
+    println!("{cfg_value}");
 
     println!("\nConverted ENC_KEYS as base64 for Kubernetes secrets:\n");
-    println!("{}", secrets_value);
+    println!("{secrets_value}");
 
     Ok(())
 }
@@ -218,7 +218,7 @@ pub async fn new_random_key(args: ArgsKeysNew) -> Result<(), CryptrError> {
 
     let msg = "New key generated with key id:".green();
     let id = keys.enc_key_active.yellow().on_black();
-    println!("{} {}", msg, id);
+    println!("{msg} {id}");
 
     let mut config = EncConfig::read().await.unwrap_or_default();
     config.enc_keys = keys;
@@ -243,11 +243,11 @@ pub async fn list_keys(args: ArgsKeysList) -> Result<(), CryptrError> {
     if args.show_values {
         for (id, key) in &keys.enc_keys {
             let key_b64 = b64_encode(key);
-            println!("{:21}{}", id, key_b64);
+            println!("{id:21}{key_b64}");
         }
     } else {
         for (id, _key) in &keys.enc_keys {
-            println!("{}", id);
+            println!("{id}");
         }
     }
 
@@ -297,8 +297,8 @@ pub async fn export_keys(args: ArgsKeysExport) -> Result<(), CryptrError> {
                 // in this case, there is only one key that can be active
                 let (active_id, _) = keys.enc_keys.first().unwrap();
                 println!(
-                    "Current active key is not in exported keys, setting new active to: {}",
-                    active_id
+                    "Current active key is not in exported keys, setting new active to: {active_id}"
+
                 );
 
                 keys.enc_key_active.clone_from(active_id);
@@ -310,7 +310,7 @@ pub async fn export_keys(args: ArgsKeysExport) -> Result<(), CryptrError> {
 
                 for i in 1..=keys_len {
                     let (id, _) = keys.enc_keys.get(i).unwrap();
-                    println!("{} : {}", i, id);
+                    println!("{i} : {id}");
                 }
 
                 let mut input;
@@ -352,9 +352,9 @@ pub async fn export_keys(args: ArgsKeysExport) -> Result<(), CryptrError> {
 
     if let Some(file) = args.file {
         sealed.save_to_file(&file).await?;
-        println!("Sealed Encryption Keys saved to '{}'", file);
+        println!("Sealed Encryption Keys saved to '{file}'");
     } else {
-        println!("Sealed Encryption Keys:\n\n{}", sealed);
+        println!("Sealed Encryption Keys:\n\n{sealed}");
     }
 
     Ok(())
@@ -397,7 +397,7 @@ pub async fn import_keys(args: ArgsKeysImport) -> Result<(), CryptrError> {
                     let msg = format!("Skipping already existing Key ID '{}'", key.0)
                         .yellow()
                         .on_black();
-                    eprintln!("{}", msg);
+                    eprintln!("{msg}");
                 } else {
                     config.enc_keys.enc_keys.push(key);
                 }
@@ -470,7 +470,7 @@ pub async fn delete_key() -> Result<(), CryptrError> {
     }
 
     config.save().await?;
-    println!("Key ID '{}' deleted from config", trimmed);
+    println!("Key ID '{trimmed}' deleted from config");
 
     Ok(())
 }
@@ -501,7 +501,7 @@ pub async fn set_active() -> Result<(), CryptrError> {
 
     config.enc_keys.enc_key_active = trimmed.to_string();
     config.save().await?;
-    println!("Active Key ID is now: '{}'", trimmed);
+    println!("Active Key ID is now: '{trimmed}'");
 
     Ok(())
 }
@@ -542,7 +542,7 @@ pub async fn s3_update() -> Result<(), CryptrError> {
             break;
         } else {
             let msg = "You must provide a valid URL!\n".red();
-            eprintln!("{}", msg);
+            eprintln!("{msg}");
         }
     }
 
@@ -628,7 +628,7 @@ pub async fn s3_list(args: ArgsS3List) -> Result<(), CryptrError> {
     // let body = res.text().await?;
     // let parsed =
     //     ListObjectsV2::parse_response(&body).map_err(|err| CryptrError::S3(err.to_string()))?;
-    println!("{:#?}", res);
+    println!("{res:#?}");
 
     Ok(())
 }

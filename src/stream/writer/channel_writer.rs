@@ -26,7 +26,7 @@ impl ChannelWriter {
 
     pub async fn err(mut self, err: Option<CryptrError>) {
         let err = err.unwrap_or_else(|| CryptrError::Generic("ChannelWriter error".to_string()));
-        let _ = self.0.send(Err(err));
+        let _ = self.0.send(Err(err)).await;
     }
 }
 

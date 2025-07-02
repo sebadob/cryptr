@@ -25,7 +25,7 @@ pub(crate) async fn read_line_stdin() -> Result<String, CryptrError> {
                     "Error reading line from stdin".to_string(),
                 ))
             }
-            Some(data) => write!(res, "{}", data)?,
+            Some(data) => write!(res, "{data}")?,
         }
     }
 
@@ -74,7 +74,7 @@ impl PromptPassword {
                     return Ok(password);
                 }
                 Err(policy) => {
-                    eprintln!("{}", policy);
+                    eprintln!("{policy}");
                 }
             }
         }
@@ -88,23 +88,23 @@ impl PromptPassword {
         }
 
         if let Some(min) = self.min_len {
-            writeln!(policy, " - min length: {}", min)?;
+            writeln!(policy, " - min length: {min}")?;
         }
 
         if let Some(max) = self.max_len {
-            writeln!(policy, " - max length: {}", max)?;
+            writeln!(policy, " - max length: {max}")?;
         }
 
         if let Some(lower) = self.contains_lowercase {
-            writeln!(policy, " - min lowercase characters: {}", lower)?;
+            writeln!(policy, " - min lowercase characters: {lower}")?;
         }
 
         if let Some(upper) = self.contains_uppercase {
-            writeln!(policy, " - min uppercase characters: {}", upper)?;
+            writeln!(policy, " - min uppercase characters: {upper}")?;
         }
 
         if let Some(digit) = self.contains_digit {
-            writeln!(policy, " - min digits: {}", digit)?;
+            writeln!(policy, " - min digits: {digit}")?;
         }
 
         Ok(policy)

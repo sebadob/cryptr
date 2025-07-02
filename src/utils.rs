@@ -21,7 +21,7 @@ pub fn b64_decode(b64: &str) -> Result<Vec<u8>, CryptrError> {
 pub fn secure_random(buf: &mut [u8]) -> Result<(), CryptrError> {
     rand::rng()
         .try_fill_bytes(buf)
-        .map_err(|err| CryptrError::Generic(format!("No access to OsRng: {:?}", err)))?;
+        .map_err(|err| CryptrError::Generic(format!("No access to OsRng: {err:?}")))?;
     Ok(())
 }
 

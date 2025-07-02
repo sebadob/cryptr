@@ -157,9 +157,9 @@ impl EncKeys {
             .ok_or(CryptrError::File("Cannot convert $HOME path to str"))?;
 
         #[cfg(target_family = "unix")]
-        let path = format!("{}/.cryptr/config", home_str);
+        let path = format!("{home_str}/.cryptr/config");
         #[cfg(not(target_family = "unix"))]
-        let path = format!("{}\\.cryptr\\config", home_str);
+        let path = format!("{home_str}\\.cryptr\\config");
         Ok(path)
     }
 
@@ -189,8 +189,8 @@ impl EncKeys {
     pub fn fmt_enc_keys_str_for_config(enc_keys: &str) -> (String, String) {
         let value_v64 = b64_encode(enc_keys.as_bytes());
 
-        let cfg_value = format!("ENC_KEYS=\"\n{}\"", enc_keys);
-        let secrets_value = format!("ENC_KEYS: {}", value_v64);
+        let cfg_value = format!("ENC_KEYS=\"\n{enc_keys}\"");
+        let secrets_value = format!("ENC_KEYS: {value_v64}");
 
         (cfg_value, secrets_value)
     }
@@ -290,7 +290,7 @@ impl EncKeys {
         let mut keys = String::with_capacity(self.enc_keys.len() * 56);
         for (id, key) in &self.enc_keys {
             let kb64 = b64_encode(key);
-            writeln!(keys, "{}/{}", id, kb64)?;
+            writeln!(keys, "{id}/{kb64}")?;
         }
         Ok(keys)
     }
@@ -299,7 +299,7 @@ impl EncKeys {
     pub fn keys_as_b64_vec(&self) -> Vec<String> {
         self.enc_keys
             .iter()
-            .map(|(id, key)| format!("{}/{}", id, b64_encode(key)))
+            .map(|(id, key)| format!("{id}/{}", b64_encode(key)))
             .collect::<Vec<_>>()
     }
 
@@ -324,7 +324,7 @@ impl EncKeys {
         }
 
         fs::create_dir_all(path).await?;
-        let path_full = format!("{}/{}", path, file_name);
+        let path_full = format!("{path}/{file_name}");
         if let Ok(file) = File::open(&path_full).await {
             let meta = file.metadata().await?;
             if meta.is_dir() {
@@ -335,13 +335,13 @@ impl EncKeys {
         let mut keys = String::with_capacity(self.enc_keys.len() * 56);
         for (id, key) in &self.enc_keys {
             let kb64 = b64_encode(key);
-            writeln!(keys, "{}/{}", id, kb64)?;
+            writeln!(keys, "{id}/{kb64}")?;
         }
         let _ = keys.split_off(keys.len() - 1);
 
         let content = format!(
-            "ENC_KEY_ACTIVE={}\nENC_KEYS=\"\n{}\n\"",
-            self.enc_key_active, keys
+            "ENC_KEY_ACTIVE={}\nENC_KEYS=\"\n{keys}\n\"",
+            self.enc_key_active
         );
         fs::write(&path_full, content.as_bytes()).await?;
         #[cfg(target_family = "unix")]
@@ -480,10 +480,7 @@ impl EncKeys {
                 }
 
                 if key.len() != 32 {
-                    error!(
-                        "Encryption Key for Enc Key Id '{}' is not 32 bytes long",
-                        id
-                    );
+                    error!("Encryption Key for Enc Key Id '{id}' is not 32 bytes long");
                     return Err(CryptrError::Keys("Encryption Key is not 32 bytes long"));
                 }
 
@@ -500,7 +497,7 @@ impl EncKeys {
         let mut res = String::with_capacity(keys_map.len() * 48);
         for (id, key) in keys_map {
             let key_b64 = b64_encode(&key);
-            writeln!(res, "{}/{}", id, key_b64)?;
+            writeln!(res, "{id}/{key_b64}")?;
         }
 
         Ok(res)
@@ -606,7 +603,7 @@ mod tests {
     }
 
     #[test]
-    fn test_from_kdf_value () {
+    fn test_from_kdf_value() {
         let kdf_value = KdfValue::new("123");
         let id = kdf_value.enc_key_value();
         let enc_keys = EncKeys::from(kdf_value);
@@ -623,14 +620,14 @@ mod tests {
         let enc_keys1 = EncKeys::from(kdf_value);
         assert_eq!(enc_keys1.enc_key_active, id1);
         assert_eq!(enc_keys1.enc_keys.len(), 1);
-        
+
         // Check that it's not the same as the default params with the same password
         let kdf_value = KdfValue::new("123");
         let id2 = kdf_value.enc_key_value();
         let enc_keys2 = EncKeys::from(kdf_value);
         assert_eq!(enc_keys2.enc_key_active, id2);
         assert_eq!(enc_keys2.enc_keys.len(), 1);
-        
+
         assert_ne!(enc_keys1.enc_key_active, enc_keys2.enc_key_active);
         assert_ne!(enc_keys1.into_bytes(), enc_keys2.into_bytes());
     }

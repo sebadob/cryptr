@@ -89,7 +89,7 @@ impl EncStreamReader for FileReader<'_> {
                 let _ = tx_progress.send(total);
             }
 
-            debug!("Total bytes read: {}", total);
+            debug!("Total bytes read: {total}");
             Ok(())
         });
 
@@ -156,7 +156,7 @@ impl EncStreamReader for FileReader<'_> {
                 let _ = tx_progress.send(total);
             }
 
-            debug!("Total bytes read: {}", total);
+            debug!("Total bytes read: {total}");
             Ok(())
         });
 
@@ -192,8 +192,8 @@ impl FileReader<'_> {
                     let progress = *rx_progess.borrow() as f64 / div;
                     let rate = progress / start.elapsed().as_secs() as f64;
                     println!(
-                        "FileReader ({}) {:.02} / {:.02} {} -> {:.02} {}/s",
-                        path, progress, target, unit, rate, unit,
+                        "FileReader ({path}) {progress:.02} / {target:.02} {unit} \
+                        -> {rate:.02} {unit}/s"
                     );
                     if progress >= target {
                         break;

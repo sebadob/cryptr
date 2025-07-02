@@ -55,7 +55,7 @@ impl EncStreamReader for S3Reader<'_> {
 
         // now get the object itself
         let resp = self.bucket.get(self.object).await?;
-        debug!("resp: {:?}", resp);
+        debug!("resp: {resp:?}");
 
         let handle = tokio::spawn(async move {
             let stream = resp.bytes_stream();
@@ -64,7 +64,7 @@ impl EncStreamReader for S3Reader<'_> {
 
             let mut data = stream.next().await;
             if let Some(Err(err)) = &data {
-                let msg = format!("S3 bucket error: {}", err);
+                let msg = format!("S3 bucket error: {err}");
                 tx.send_async(Err(CryptrError::S3(msg.clone()))).await?;
                 return Err(CryptrError::S3(msg));
             }
@@ -95,10 +95,10 @@ impl EncStreamReader for S3Reader<'_> {
                     Some(res) => {
                         // we have at least one more element
                         if res.is_err() {
-                            debug!("stream rest in loop error: {:?}", res);
-                            tx.send_async(Err(CryptrError::S3(format!("{:?}", res))))
+                            debug!("stream rest in loop error: {res:?}");
+                            tx.send_async(Err(CryptrError::S3(format!("{res:?}"))))
                                 .await?;
-                            return Err(CryptrError::S3(format!("{:?}", res)));
+                            return Err(CryptrError::S3(format!("{res:?}")));
                         }
                     }
                 }
@@ -151,7 +151,7 @@ impl EncStreamReader for S3Reader<'_> {
                     tx_init.send(payload).expect("tx_init to work properly");
                 }
                 Err(err) => {
-                    error!("tx_init closed in reader: {:?}", err);
+                    error!("tx_init closed in reader: {err:?}");
                 }
             }
         });
@@ -163,7 +163,7 @@ impl EncStreamReader for S3Reader<'_> {
 
             let mut data = stream.next().await;
             if let Some(Err(err)) = &data {
-                let msg = format!("S3 bucket error: {}", err);
+                let msg = format!("S3 bucket error: {err}");
                 tx.send_async(Err(CryptrError::S3(msg.clone()))).await?;
                 return Err(CryptrError::S3(msg));
             }
@@ -191,16 +191,15 @@ impl EncStreamReader for S3Reader<'_> {
                             Ok(d) => d,
                             Err(err) => {
                                 let msg = format!(
-                                    "Error extracting encryption header from first chunk: {:?}",
-                                    err
+                                    "Error extracting encryption header from first chunk: {err:?}"
                                 );
                                 tx.send_async(Err(CryptrError::S3(msg.clone()))).await?;
                                 return Err(CryptrError::S3(msg));
                             }
                         };
                     debug!(
-                        "Extracted header data from first chunk: {:?} with payload_offset: {}",
-                        enc_header, payload_offset
+                        "Extracted header data from first chunk: {enc_header:?} with \
+                        payload_offset: {payload_offset}"
                     );
 
                     // initialize the streaming manager
@@ -223,10 +222,10 @@ impl EncStreamReader for S3Reader<'_> {
                     None => true,
                     Some(res) => {
                         if res.is_err() {
-                            debug!("stream rest in loop error: {:?}", res);
-                            tx.send_async(Err(CryptrError::S3(format!("{:?}", res))))
+                            debug!("stream rest in loop error: {res:?}");
+                            tx.send_async(Err(CryptrError::S3(format!("{res:?}"))))
                                 .await?;
-                            return Err(CryptrError::S3(format!("{:?}", res)));
+                            return Err(CryptrError::S3(format!("{res:?}")));
                         }
                         false
                     }
@@ -252,7 +251,7 @@ impl EncStreamReader for S3Reader<'_> {
                 }
             }
 
-            debug!("Read {} bytes", total);
+            debug!("Read {total} bytes");
             Ok(())
         });
 
@@ -288,8 +287,8 @@ impl S3Reader<'_> {
                     let progress = *rx_progess.borrow() as f64 / div;
                     let rate = progress / start.elapsed().as_secs() as f64;
                     println!(
-                        "S3Reader ({}) {:.02} / {:.02} {} -> {:.02} {}/s",
-                        object, progress, target, unit, rate, unit,
+                        "S3Reader ({object}) {progress:.02} / {target:.02} {unit} \
+                        -> {rate:.02} {unit}/s"
                     );
                     if progress >= target {
                         break;

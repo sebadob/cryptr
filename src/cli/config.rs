@@ -36,12 +36,12 @@ impl Display for S3Config {
         write!(
             f,
             r#"S3 Config
-URL:            {}
+URL:            {url}
 Use path style: {}
-Region:         {}
-Access Key:     {}
+Region:         {region}
+Access Key:     {access_key}
 Access Secret:  <hidden>"#,
-            url, self.path_style, region, access_key
+            self.path_style
         )
     }
 }
@@ -123,7 +123,7 @@ impl EncConfig {
             None => path.to_string(),
             Some((path, file)) => {
                 fs::create_dir_all(path).await?;
-                let path_full = format!("{}/{}", path, file);
+                let path_full = format!("{path}/{file}");
                 if let Ok(file) = File::open(&path_full).await {
                     let meta = file.metadata().await?;
                     if meta.is_dir() {

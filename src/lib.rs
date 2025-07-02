@@ -80,7 +80,7 @@ impl CryptrError {
 
 impl From<CryptrError> for std::io::Error {
     fn from(value: CryptrError) -> Self {
-        Self::new(std::io::ErrorKind::Other, value.to_string())
+        Self::other(value.to_string())
     }
 }
 
