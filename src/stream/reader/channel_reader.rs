@@ -7,12 +7,11 @@ use async_trait::async_trait;
 use flume::Sender;
 use futures::channel::oneshot;
 use futures::StreamExt;
-use std::cmp::min;
 use std::fmt::Formatter;
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
-pub type ChannelSender = futures::channel::mpsc::Sender<Option<Vec<u8>>>;
+pub type ChannelSender = futures::channel::mpsc::Sender<Result<Vec<u8>, CryptrError>>;
 
 /// Streaming Channel Reader
 ///
@@ -25,13 +24,14 @@ pub type ChannelSender = futures::channel::mpsc::Sender<Option<Vec<u8>>>;
 /// the chunk size you are sending over the channel!
 /// You should always send `ChunkSizeKb::default().value_bytes()` chunks via the channel, as long
 /// as you have not defined a custom chunk size. In that case, you must match this exactly. Only
-/// the very last element is allowed to be smaller than all other chunks. You "confirm" that your
-/// message is complete by sending a `None` as your last message, or if your last chunk is smaller
-/// than the others, it will be seen as the last chunk as well. This means even though it's very
-/// unlikely, depending on race-conditions, it might be the case that your last `None` message
-/// might be sent on a closed channel, and you should prepare to catch that gracefully.
+/// the very last element is allowed to be smaller than all other chunks.
+///
+/// The sending will be considered done when one of these is true:
+/// - sender is dropped
+/// - chunk size is `0`
+/// - chunk size is smaller than the ones before
 #[derive(Debug)]
-pub struct ChannelReader(futures::channel::mpsc::Receiver<Option<Vec<u8>>>);
+pub struct ChannelReader(futures::channel::mpsc::Receiver<Result<Vec<u8>, CryptrError>>);
 
 impl ChannelReader {
     pub fn new() -> (Self, ChannelSender) {
@@ -55,7 +55,7 @@ impl EncStreamReader for ChannelReader {
         let handle: JoinHandle<Result<(), CryptrError>> = tokio::spawn(async move {
             let mut total = 0;
 
-            let Some(Some(mut buf)) = self.0.next().await else {
+            let Some(Ok(mut buf)) = self.0.next().await else {
                 return Err(CryptrError::Encryption(
                     "Received no data inside ChannelReader",
                 ));
@@ -71,11 +71,19 @@ impl EncStreamReader for ChannelReader {
                 );
             }
 
-            while let Some(msg) = self.0.next().await {
-                let (is_last, last_elem) = if msg.is_none() || msg.as_ref().unwrap().is_empty() {
-                    (true, LastStreamElement::Yes)
-                } else {
-                    (false, LastStreamElement::No)
+            loop {
+                let (is_last, last_elem, bytes) = match self.0.next().await {
+                    None => (true, LastStreamElement::Yes, Vec::default()),
+                    Some(Ok(bytes)) => {
+                        if bytes.is_empty() {
+                            (true, LastStreamElement::Yes, bytes)
+                        } else {
+                            (false, LastStreamElement::No, bytes)
+                        }
+                    }
+                    Some(Err(err)) => {
+                        return Err(err);
+                    }
                 };
 
                 let len = buf.len();
@@ -83,11 +91,19 @@ impl EncStreamReader for ChannelReader {
                 let chunk = StreamChunk::new(buf);
                 tx.send_async(Ok((last_elem, chunk))).await?;
 
-                if is_last || len < chunk_size {
+                if is_last {
                     break;
                 }
 
-                buf = msg.unwrap();
+                // if the chunk is smaller than the ones before, it can only be the last one
+                if bytes.len() < len {
+                    total += bytes.len();
+                    let chunk = StreamChunk::new(bytes);
+                    tx.send_async(Ok((LastStreamElement::Yes, chunk))).await?;
+                    break;
+                }
+
+                buf = bytes;
             }
 
             debug!("Total bytes read: {total}");

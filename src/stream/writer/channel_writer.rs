@@ -7,7 +7,7 @@ use futures::SinkExt;
 use std::fmt::Formatter;
 use tracing::debug;
 
-pub type ChannelReceiver = futures::channel::mpsc::Receiver<Option<Vec<u8>>>;
+pub type ChannelReceiver = futures::channel::mpsc::Receiver<Result<Vec<u8>, CryptrError>>;
 
 /// Streaming Channel Writer
 ///
@@ -15,13 +15,18 @@ pub type ChannelReceiver = futures::channel::mpsc::Receiver<Option<Vec<u8>>>;
 /// This can be used for in-memory streaming operations. Compared to the `MemoryWriter`, which will
 /// buffer the whole response into its buffer first, you get a Channel receiver with this one that
 /// you can consume async and in chunks.
-#[derive(Debug)]
-pub struct ChannelWriter(futures::channel::mpsc::Sender<Option<Vec<u8>>>);
+#[derive(Debug, Clone)]
+pub struct ChannelWriter(futures::channel::mpsc::Sender<Result<Vec<u8>, CryptrError>>);
 
 impl ChannelWriter {
     pub fn new() -> (Self, ChannelReceiver) {
         let (tx, rx) = futures::channel::mpsc::channel(CHANNELS);
-        (Self(tx), rx)
+        (Self(tx.clone()), rx)
+    }
+
+    pub async fn err(mut self, err: Option<CryptrError>) {
+        let err = err.unwrap_or_else(|| CryptrError::Generic("ChannelWriter error".to_string()));
+        let _ = self.0.send(Err(err));
     }
 }
 
@@ -42,7 +47,7 @@ impl EncStreamWriter for ChannelWriter {
             total += payload.len();
 
             self.0
-                .send(Some(payload))
+                .send(Ok(payload))
                 .await
                 .map_err(|err| CryptrError::Generic(err.to_string()))?;
 
@@ -51,11 +56,6 @@ impl EncStreamWriter for ChannelWriter {
                 break;
             }
         }
-
-        self.0
-            .send(None)
-            .await
-            .map_err(|err| CryptrError::Generic(err.to_string()))?;
 
         debug!("Writer exiting: {total} bytes received");
 

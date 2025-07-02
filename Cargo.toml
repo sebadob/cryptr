@@ -1,6 +1,6 @@
 [package]
 name = "cryptr"
-version = "0.6.2"
+version = "0.7.0-20250702"
 edition = "2021"
 rust-version = "1.85.1"
 license = "Apache-2.0"
