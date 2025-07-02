@@ -1,7 +1,7 @@
 use crate::encryption::ChunkSizeKb;
 use crate::stream::EncStreamReader;
 use crate::stream::{LastStreamElement, StreamChunk};
-use crate::value::EncValueHeader;
+use crate::value::{EncValueHeader, CHANNELS};
 use crate::CryptrError;
 use async_trait::async_trait;
 use flume::Sender;
@@ -11,6 +11,8 @@ use std::cmp::min;
 use std::fmt::Formatter;
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
+
+pub type ChannelSender = futures::channel::mpsc::Sender<Option<Vec<u8>>>;
 
 /// Streaming Channel Reader
 ///
@@ -30,6 +32,13 @@ use tracing::{debug, warn};
 /// might be sent on a closed channel, and you should prepare to catch that gracefully.
 #[derive(Debug)]
 pub struct ChannelReader(futures::channel::mpsc::Receiver<Option<Vec<u8>>>);
+
+impl ChannelReader {
+    pub fn new() -> (Self, ChannelSender) {
+        let (tx, rx) = futures::channel::mpsc::channel(CHANNELS);
+        (Self(rx), tx)
+    }
+}
 
 #[async_trait]
 impl EncStreamReader for ChannelReader {

@@ -7,6 +7,8 @@ use futures::SinkExt;
 use std::fmt::Formatter;
 use tracing::debug;
 
+pub type ChannelReceiver = futures::channel::mpsc::Receiver<Option<Vec<u8>>>;
+
 /// Streaming Channel Writer
 ///
 /// Available with feature `streaming` only.
@@ -17,7 +19,7 @@ use tracing::debug;
 pub struct ChannelWriter(futures::channel::mpsc::Sender<Option<Vec<u8>>>);
 
 impl ChannelWriter {
-    pub fn new() -> (Self, futures::channel::mpsc::Receiver<Option<Vec<u8>>>) {
+    pub fn new() -> (Self, ChannelReceiver) {
         let (tx, rx) = futures::channel::mpsc::channel(CHANNELS);
         (Self(tx), rx)
     }
