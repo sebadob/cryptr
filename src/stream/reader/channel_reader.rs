@@ -9,7 +9,7 @@ use futures::channel::oneshot;
 use futures::StreamExt;
 use std::fmt::Formatter;
 use tokio::task::JoinHandle;
-use tracing::{debug, warn};
+use tracing::debug;
 
 pub type ChannelSender = futures::channel::mpsc::Sender<Result<Vec<u8>, CryptrError>>;
 
@@ -65,7 +65,7 @@ impl EncStreamReader for ChannelReader {
             debug!("Using {chunk_size} as chunk size");
             #[cfg(debug_assertions)]
             if chunk_size < 4096 {
-                warn!(
+                tracing::warn!(
                     "You have sent a really small first chunk (< 4 KiB) as your first stream \
                     element. You should consider increasing it, or use the `MemoryReader`"
                 );
