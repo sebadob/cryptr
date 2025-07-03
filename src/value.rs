@@ -664,10 +664,11 @@ mod tests {
     use crate::stream::reader::file_reader::FileReader;
     use crate::stream::reader::memory_reader::MemoryReader;
     use crate::stream::reader::s3_reader::S3Reader;
+    use crate::stream::writer::channel_writer::ChannelWriter;
     use crate::stream::writer::file_writer::FileWriter;
     use crate::stream::writer::memory_writer::MemoryWriter;
     use crate::stream::writer::s3_writer::S3Writer;
-    use futures::SinkExt;
+    use futures::{SinkExt, StreamExt};
     use rstest::*;
     use s3_simple::*;
     use std::env;
@@ -922,10 +923,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_channel() {
-        tracing::subscriber::set_global_default(tracing_subscriber::FmtSubscriber::new())
-            .expect("setting default subscriber failed");
-
+    async fn test_channel_encryption() {
         let _ = EncKeys::generate().unwrap().init();
 
         let chunk_size = ChunkSizeKb::try_from(1024).unwrap();
@@ -1092,6 +1090,42 @@ mod tests {
             assert_eq!(combined.len(), buf_dec.len());
             assert_eq!(combined, buf_dec);
         }
+    }
+
+    #[tokio::test]
+    async fn test_channel_decryption() {
+        let _ = EncKeys::generate().unwrap().init();
+
+        let chunk_size = ChunkSizeKb::try_from(1024).unwrap();
+        let chunk_size_bytes = 1024 * 1024;
+
+        let orig = secure_random_vec(chunk_size_bytes).unwrap();
+
+        let reader = StreamReader::Memory(MemoryReader(orig.clone()));
+        let mut buf = Vec::new();
+        let writer = StreamWriter::Memory(MemoryWriter(&mut buf));
+        EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size)
+            .await
+            .unwrap();
+        assert!(buf.len() > orig.len());
+
+        let reader = StreamReader::Memory(MemoryReader(buf));
+        let (writer, mut rx) = ChannelWriter::new();
+        let writer = StreamWriter::Channel(writer);
+
+        let handle = tokio::task::spawn(async move {
+            let mut buf = Vec::new();
+            while let Some(Ok(data)) = rx.next().await {
+                buf.extend_from_slice(&data);
+            }
+            buf
+        });
+
+        EncValue::decrypt_stream(reader, writer).await.unwrap();
+
+        let dec = handle.await.unwrap();
+        assert_eq!(orig.len(), dec.len());
+        assert_eq!(orig, dec);
     }
 
     #[tokio::test]
