@@ -19,7 +19,7 @@ async fn main() -> Result<(), CryptrError> {
     let decrypted = encrypted.decrypt_with_keys(&enc_keys)?;
     assert_eq!(plain.as_bytes(), decrypted.as_ref());
 
-    println!("Plain value: {}", plain);
+    println!("Plain value: {plain}");
     println!("Decrypted value: {}", String::from_utf8_lossy(&decrypted));
 
     Ok(())

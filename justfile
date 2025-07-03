@@ -25,6 +25,17 @@ check:
 
     echo 'Checking minimal versions'
     cargo minimal-versions check
+    cargo update
+
+    echo 'Checking examples'
+    cd examples/cli
+    cargo clippy
+    cd ../in-memory-dynamic-keys
+    cargo clippy
+    cd ../simple-in-memory
+    cargo clippy
+    cd ../streaming-file-to-file
+    cargo clippy
 
 # runs tests without s3
 test:

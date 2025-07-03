@@ -46,7 +46,7 @@ async fn main() -> Result<(), CryptrError> {
     let decrypted = enc_value.decrypt()?;
     assert_eq!(plain.as_bytes(), decrypted.as_ref());
 
-    println!("Plain value: {}", plain);
+    println!("Plain value: {plain}");
     println!("Decrypted value: {}", String::from_utf8_lossy(&decrypted));
 
     Ok(())

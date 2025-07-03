@@ -68,9 +68,9 @@ async fn main() -> Result<(), CryptrError> {
     let digest_encrypted = Sha256::digest(target_bytes);
     let digest_decrypted = Sha256::digest(plain_dec_bytes);
 
-    println!("sha256 plain: {:?}", digest_plain);
-    println!("sha256 encrypted: {:?}", digest_encrypted);
-    println!("sha256 decrypted: {:?}", digest_decrypted);
+    println!("sha256 plain: {digest_plain:?}");
+    println!("sha256 encrypted: {digest_encrypted:?}");
+    println!("sha256 decrypted: {digest_decrypted:?}");
 
     assert_ne!(digest_plain, digest_encrypted);
     assert_eq!(digest_plain, digest_decrypted);
