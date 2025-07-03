@@ -100,7 +100,7 @@ pub struct EncConfig {
 
 impl EncConfig {
     pub async fn read() -> Result<Self, CryptrError> {
-        let path = EncKeys::config_path()?;
+        let path = EncKeys::config_path().await?;
         Self::read_from_file(&path).await
     }
 
@@ -114,7 +114,7 @@ impl EncConfig {
     }
 
     pub async fn save(&self) -> Result<(), CryptrError> {
-        let path = EncKeys::config_path()?;
+        let path = EncKeys::config_path().await?;
         self.save_to_file(&path).await
     }
 

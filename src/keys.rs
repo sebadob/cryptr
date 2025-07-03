@@ -150,11 +150,13 @@ impl EncKeys {
     ///
     /// Available with feature `cli` only
     #[cfg(feature = "cli")]
-    pub fn config_path() -> Result<String, CryptrError> {
+    pub async fn config_path() -> Result<String, CryptrError> {
         let home_path = home::home_dir().ok_or(CryptrError::File("Cannot get $HOME"))?;
         let home_str = home_path
             .to_str()
             .ok_or(CryptrError::File("Cannot convert $HOME path to str"))?;
+
+        fs::create_dir_all(format!("{home_str}/.cryptr")).await?;
 
         #[cfg(target_family = "unix")]
         let path = format!("{home_str}/.cryptr/config");
@@ -199,8 +201,8 @@ impl EncKeys {
     ///
     /// Available with feature `cli` only
     #[cfg(feature = "cli")]
-    pub fn read_from_config() -> Result<Self, CryptrError> {
-        let path = Self::config_path()?;
+    pub async fn read_from_config() -> Result<Self, CryptrError> {
+        let path = Self::config_path().await?;
         if dotenvy::from_filename(path).is_err() {
             Err(CryptrError::Config("Config has not been set up yet"))
         } else {

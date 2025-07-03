@@ -198,7 +198,7 @@ pub async fn convert_legacy_key() -> Result<(), CryptrError> {
 pub async fn new_random_key(args: ArgsKeysNew) -> Result<(), CryptrError> {
     println!("Generating a new random encryption key");
 
-    let keys = match EncKeys::read_from_config() {
+    let keys = match EncKeys::read_from_config().await {
         Ok(mut keys) => {
             if let Some(id) = args.with_id {
                 keys.append_new_random_with_id(id)?;
@@ -232,7 +232,7 @@ pub async fn list_keys(args: ArgsKeysList) -> Result<(), CryptrError> {
     let keys = if let Some(path) = &args.file {
         EncKeys::read_from_file(path)?
     } else {
-        EncKeys::read_from_config()?
+        EncKeys::read_from_config().await?
     };
 
     println!(
