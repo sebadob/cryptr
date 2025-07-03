@@ -9,6 +9,9 @@ and then maybe return it as an async HTTP response.
 The `ChannelReader` does NOT implement a decryption logic, because it does not make much sense. If you want to decrypt
 in-memory values, just stick to the already existing `MemoryReader`.
 
+This release also fixes a bug for the CLI, which could throw an unexpected error during `keys new-random` when the
+config dir does not exist yet.
+
 ## v0.6.2
 
 Fixes a bug in `KdfValue::new_with_params()`, which ignored `m_cost`, `t_cost`, `p_cost` from the params and used the
