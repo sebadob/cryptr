@@ -1,6 +1,6 @@
 # Changelog
 
-## UNRELEASED
+## v0.7.0
 
 This version brings a new `ChannelReader` and `ChannelWriter`. These can be used for working with streaming values
 in-memory, for instance when you want to download a `cryptr` file from S3, receive the data in-memory, apply conversions
