@@ -1,9 +1,9 @@
 use crate::stream::{EncStreamWriter, LastStreamElement, StreamChunk};
+use crate::CryptrError;
 use async_trait::async_trait;
 use flume::Receiver;
 use std::fmt::Formatter;
 use tracing::debug;
-use crate::CryptrError;
 
 /// Streaming In-Memory Writer
 ///
@@ -25,14 +25,27 @@ impl EncStreamWriter for MemoryWriter<'_> {
         self.0.clear();
 
         let mut total = 0;
-        while let Ok(Ok((is_last, data))) = rx.recv_async().await {
-            let payload = data.0;
-            total += payload.len();
-            self.0.extend(payload);
 
-            if is_last == LastStreamElement::Yes {
-                debug!("Last payload received. Total bytes received: {}", total);
-                break;
+        loop {
+            match rx.recv_async().await {
+                Ok(Ok((is_last, data))) => {
+                    let payload = data.0;
+                    total += payload.len();
+                    self.0.extend(payload);
+
+                    if is_last == LastStreamElement::Yes {
+                        debug!("Last payload received. Total bytes received: {}", total);
+                        break;
+                    }
+                }
+                Ok(Err(err)) => {
+                    return Err(err);
+                }
+                Err(_) => {
+                    return Err(CryptrError::Generic(
+                        "Decryption task closed the channel".to_string(),
+                    ));
+                }
             }
         }
 

@@ -34,9 +34,9 @@ impl EncStreamWriter for S3Writer<'_> {
         let mut total = 0;
 
         let s = async_stream::stream! {
-            while let Ok(msg) = rx.recv_async().await {
-                match msg {
-                    Ok((is_last, data)) => {
+            loop {
+                match rx.recv_async().await {
+                    Ok(Ok((is_last, data))) => {
                         let payload = Bytes::from(data.0);
                         total += payload.len();
                         yield Ok(payload);
@@ -46,8 +46,14 @@ impl EncStreamWriter for S3Writer<'_> {
                             break;
                         }
                     }
-                    Err(err) => {
+                    Ok(Err(err)) => {
                         yield Err(err);
+                        break;
+                    }
+                    Err(_) => {
+                        yield Err(CryptrError::Generic(
+                            "Decryption task closed the channel".to_string(),
+                        ));
                         break;
                     }
                 }

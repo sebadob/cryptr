@@ -527,7 +527,7 @@ impl EncValue {
     ) -> Result<(), CryptrError> {
         // chacha20 stream cipher nonce is 7 bytes
         let nonce_size = header.alg.nonce_size_stream() as usize;
-        let nonce = secure_random_vec(nonce_size)?; // TODO change to slice
+        let nonce = secure_random_vec(nonce_size)?;
 
         let version = header.version.clone();
         let alg = header.alg.clone();
@@ -660,12 +660,14 @@ impl EncValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stream::reader::channel_reader::ChannelReader;
     use crate::stream::reader::file_reader::FileReader;
     use crate::stream::reader::memory_reader::MemoryReader;
     use crate::stream::reader::s3_reader::S3Reader;
     use crate::stream::writer::file_writer::FileWriter;
     use crate::stream::writer::memory_writer::MemoryWriter;
     use crate::stream::writer::s3_writer::S3Writer;
+    use futures::SinkExt;
     use rstest::*;
     use s3_simple::*;
     use std::env;
@@ -917,6 +919,179 @@ mod tests {
         let plain_dec_bytes = fs::read(plain_dec).await.unwrap();
         assert_eq!(plain_bytes.len(), plain_dec_bytes.len());
         assert_eq!(plain_bytes, plain_dec_bytes);
+    }
+
+    #[tokio::test]
+    async fn test_channel() {
+        tracing::subscriber::set_global_default(tracing_subscriber::FmtSubscriber::new())
+            .expect("setting default subscriber failed");
+
+        let _ = EncKeys::generate().unwrap().init();
+
+        let chunk_size = ChunkSizeKb::try_from(1024).unwrap();
+        let chunk_size_bytes = 1024 * 1024;
+
+        // a single chunk lower than given chunk size
+        {
+            let (rdr, mut tx) = ChannelReader::new();
+            let reader = StreamReader::Channel(rdr);
+            let mut buf = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf));
+
+            // let chunk_1 = secure_random_vec(cs as usize).unwrap();
+            // let chunk_2 = secure_random_vec(cs as usize).unwrap();
+            let chunk_1 = secure_random_vec(chunk_size_bytes / 2).unwrap();
+            let c1 = chunk_1.clone();
+
+            tokio::task::spawn(async move { tx.send(Ok(c1)).await.unwrap() });
+
+            EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size.clone())
+                .await
+                .unwrap();
+
+            let reader = StreamReader::Memory(MemoryReader(buf));
+            let mut buf_dec = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf_dec));
+            EncValue::decrypt_stream(reader, writer).await.unwrap();
+
+            assert_eq!(chunk_1.len(), buf_dec.len());
+            assert_eq!(chunk_1, buf_dec);
+        }
+
+        // a single chunk matching given chunk size
+        {
+            let (rdr, mut tx) = ChannelReader::new();
+            let reader = StreamReader::Channel(rdr);
+            let mut buf = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf));
+
+            let chunk_1 = secure_random_vec(chunk_size_bytes).unwrap();
+            let c1 = chunk_1.clone();
+
+            tokio::task::spawn(async move { tx.send(Ok(c1)).await.unwrap() });
+
+            EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size.clone())
+                .await
+                .unwrap();
+
+            let reader = StreamReader::Memory(MemoryReader(buf));
+            let mut buf_dec = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf_dec));
+            EncValue::decrypt_stream(reader, writer).await.unwrap();
+
+            assert_eq!(chunk_1.len(), buf_dec.len());
+            assert_eq!(chunk_1, buf_dec);
+        }
+
+        // multiple chunks, with the last one being 0
+        {
+            let (rdr, mut tx) = ChannelReader::new();
+            let reader = StreamReader::Channel(rdr);
+            let mut buf = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf));
+
+            let chunk_1 = secure_random_vec(chunk_size_bytes).unwrap();
+            let chunk_2 = secure_random_vec(chunk_size_bytes).unwrap();
+            let chunk_3: Vec<u8> = Vec::default();
+            let c1 = chunk_1.clone();
+            let c2 = chunk_2.clone();
+            let c3 = chunk_3.clone();
+
+            let mut combined = chunk_1.clone();
+            combined.extend_from_slice(&chunk_2);
+
+            tokio::task::spawn(async move {
+                tx.send(Ok(c1)).await.unwrap();
+                tx.send(Ok(c2)).await.unwrap();
+                tx.send(Ok(c3)).await.unwrap();
+            });
+
+            EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size.clone())
+                .await
+                .unwrap();
+
+            let reader = StreamReader::Memory(MemoryReader(buf));
+            let mut buf_dec = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf_dec));
+            EncValue::decrypt_stream(reader, writer).await.unwrap();
+
+            assert_eq!(combined.len(), buf_dec.len());
+            assert_eq!(combined, buf_dec);
+        }
+
+        // multiple chunks, with the last one being smaller
+        {
+            let (rdr, mut tx) = ChannelReader::new();
+            let reader = StreamReader::Channel(rdr);
+            let mut buf = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf));
+
+            let chunk_1 = secure_random_vec(chunk_size_bytes).unwrap();
+            let chunk_2 = secure_random_vec(chunk_size_bytes).unwrap();
+            let chunk_3: Vec<u8> = secure_random_vec(chunk_size_bytes / 2).unwrap();
+            let c1 = chunk_1.clone();
+            let c2 = chunk_2.clone();
+            let c3 = chunk_3.clone();
+
+            let mut combined = chunk_1.clone();
+            combined.extend_from_slice(&chunk_2);
+            combined.extend_from_slice(&chunk_3);
+
+            tokio::task::spawn(async move {
+                tx.send(Ok(c1)).await.unwrap();
+                tx.send(Ok(c2)).await.unwrap();
+                tx.send(Ok(c3)).await.unwrap();
+            });
+
+            EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size.clone())
+                .await
+                .unwrap();
+
+            let reader = StreamReader::Memory(MemoryReader(buf));
+            let mut buf_dec = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf_dec));
+            EncValue::decrypt_stream(reader, writer).await.unwrap();
+
+            assert_eq!(combined.len(), buf_dec.len());
+            assert_eq!(combined, buf_dec);
+        }
+
+        // multiple chunks, with the last one matching in size
+        {
+            let (rdr, mut tx) = ChannelReader::new();
+            let reader = StreamReader::Channel(rdr);
+            let mut buf = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf));
+
+            let chunk_1 = secure_random_vec(chunk_size_bytes).unwrap();
+            let chunk_2 = secure_random_vec(chunk_size_bytes).unwrap();
+            let chunk_3: Vec<u8> = secure_random_vec(chunk_size_bytes).unwrap();
+            let c1 = chunk_1.clone();
+            let c2 = chunk_2.clone();
+            let c3 = chunk_3.clone();
+
+            let mut combined = chunk_1.clone();
+            combined.extend_from_slice(&chunk_2);
+            combined.extend_from_slice(&chunk_3);
+
+            tokio::task::spawn(async move {
+                tx.send(Ok(c1)).await.unwrap();
+                tx.send(Ok(c2)).await.unwrap();
+                tx.send(Ok(c3)).await.unwrap();
+            });
+
+            EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size.clone())
+                .await
+                .unwrap();
+
+            let reader = StreamReader::Memory(MemoryReader(buf));
+            let mut buf_dec = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf_dec));
+            EncValue::decrypt_stream(reader, writer).await.unwrap();
+
+            assert_eq!(combined.len(), buf_dec.len());
+            assert_eq!(combined, buf_dec);
+        }
     }
 
     #[tokio::test]

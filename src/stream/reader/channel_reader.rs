@@ -64,9 +64,9 @@ impl EncStreamReader for ChannelReader {
             let chunk_size = buf.len();
             debug!("Using {chunk_size} as chunk size");
             #[cfg(debug_assertions)]
-            if chunk_size < 8192 {
+            if chunk_size < 4096 {
                 warn!(
-                    "You have sent a really small first chunk (< 8 KiB) as your first stream \
+                    "You have sent a really small first chunk (< 4 KiB) as your first stream \
                     element. You should consider increasing it, or use the `MemoryReader`"
                 );
             }

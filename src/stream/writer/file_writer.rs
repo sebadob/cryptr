@@ -1,9 +1,9 @@
 use crate::stream::{EncStreamWriter, LastStreamElement, StreamChunk};
+use crate::CryptrError;
 use async_trait::async_trait;
 use flume::Receiver;
 use std::fmt::Formatter;
 use tracing::debug;
-use crate::CryptrError;
 
 /// Streaming FileWriter
 ///
@@ -57,14 +57,27 @@ impl EncStreamWriter for FileWriter<'_> {
         let mut file = opts.open(&self.path).await?;
 
         let mut total = 0;
-        while let Ok(Ok((is_last, data))) = rx.recv_async().await {
-            let payload = data.as_ref();
-            let length = file.write(payload).await?;
-            total += length;
 
-            if is_last == LastStreamElement::Yes {
-                debug!("Last payload received. Total bytes written: {}", total);
-                break;
+        loop {
+            match rx.recv_async().await {
+                Ok(Ok((is_last, data))) => {
+                    let payload = data.as_ref();
+                    let length = file.write(payload).await?;
+                    total += length;
+
+                    if is_last == LastStreamElement::Yes {
+                        debug!("Last payload received. Total bytes written: {}", total);
+                        break;
+                    }
+                }
+                Ok(Err(err)) => {
+                    return Err(err);
+                }
+                Err(_) => {
+                    return Err(CryptrError::Generic(
+                        "Decryption task closed the channel".to_string(),
+                    ));
+                }
             }
         }
 
