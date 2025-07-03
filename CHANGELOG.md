@@ -1,5 +1,14 @@
 # Changelog
 
+## UNRELEASED
+
+This version brings a new `ChannelReader` and `ChannelWriter`. These can be used for working with streaming values
+in-memory, for instance when you want to download a `cryptr` file from S3, receive the data in-memory, apply conversions
+and then maybe return it as an async HTTP response.
+
+The `ChannelReader` does NOT implement a decryption logic, because it does not make much sense. If you want to decrypt
+in-memory values, just stick to the already existing `MemoryReader`.
+
 ## v0.6.2
 
 Fixes a bug in `KdfValue::new_with_params()`, which ignored `m_cost`, `t_cost`, `p_cost` from the params and used the
