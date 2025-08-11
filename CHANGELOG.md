@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.8.0
+
+Bumps the `s3-simple` dependency and adds `:` as an allowed character to the `EncKeyId` validation regex.
+
 ## v0.7.0
 
 This version brings a new `ChannelReader` and `ChannelWriter`. These can be used for working with streaming values
