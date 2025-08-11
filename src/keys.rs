@@ -278,7 +278,7 @@ impl EncKeys {
 
         if !Self::re_key_id().is_match(id) {
             return Err(CryptrError::Keys(
-                "The IDs for ENC_KEYS must match '^[a-zA-Z0-9_-]{2,20}$'",
+                "The IDs for ENC_KEYS must match '^[a-zA-Z0-9:_-]{2,20}$'",
             ));
         }
 
@@ -490,7 +490,7 @@ impl EncKeys {
 
                 if !re.is_match(id) {
                     return Err(CryptrError::Keys(
-                        "The IDs for ENC_KEYS must match '^[a-zA-Z0-9_-]{2,20}$'",
+                        "The IDs for ENC_KEYS must match '^[a-zA-Z0-9:_-]{2,20}$'",
                     ));
                 }
 
