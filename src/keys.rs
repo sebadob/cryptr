@@ -111,6 +111,11 @@ impl From<KdfValue> for EncKeys {
 
 #[allow(dead_code)]
 impl EncKeys {
+    #[inline]
+    pub fn re_key_id() -> &'static Regex {
+        RE_KEY_ID.get_or_init(|| Regex::new(r"^[a-zA-Z0-9:_-]{2,20}$").unwrap())
+    }
+
     pub fn try_parse(
         enc_key_active: String,
         enc_keys_unparsed: Vec<String>,
@@ -249,9 +254,6 @@ impl EncKeys {
     }
 
     fn parse_raw_key(input: &str) -> Result<Option<(String, Vec<u8>)>, CryptrError> {
-        // we need to validate the key ids, since otherwise the parsing might fail from a webauthn cookie
-        let re = RE_KEY_ID.get_or_init(|| Regex::new(r"^[a-zA-Z0-9_-]{2,20}$").unwrap());
-
         let t: (&str, &str) = match input.split_once('/') {
             None => {
                 return Ok(None);
@@ -274,9 +276,9 @@ impl EncKeys {
             ));
         }
 
-        if !re.is_match(id) {
+        if !Self::re_key_id().is_match(id) {
             return Err(CryptrError::Keys(
-                "The IDs for ENC_KEYS must match '^[a-zA-Z0-9_-]{2,20}$'",
+                "The IDs for ENC_KEYS must match '^[a-zA-Z0-9:_-]{2,20}$'",
             ));
         }
 
@@ -465,7 +467,7 @@ impl EncKeys {
         let mut keys_map: HashMap<String, Vec<u8>> = HashMap::new();
 
         // we need to validate the key ids, since otherwise the parsing might fail from a webauthn cookie
-        let re = Regex::new(r"^[a-zA-Z0-9]{2,20}$").unwrap();
+        let re = Self::re_key_id();
 
         for k in keys.split(' ') {
             if !k.is_empty() {
@@ -488,7 +490,7 @@ impl EncKeys {
 
                 if !re.is_match(id) {
                     return Err(CryptrError::Keys(
-                        "The IDs for ENC_KEYS must match '^[a-zA-Z0-9_-]{2,20}$'",
+                        "The IDs for ENC_KEYS must match '^[a-zA-Z0-9:_-]{2,20}$'",
                     ));
                 }
 
@@ -514,8 +516,7 @@ impl EncKeys {
             }
         }
 
-        let re = RE_KEY_ID.get_or_init(|| Regex::new(r"^[a-zA-Z0-9_-]{2,20}$").unwrap());
-        if re.is_match(id) {
+        if Self::re_key_id().is_match(id) {
             Ok(())
         } else {
             Err(CryptrError::Keys(
