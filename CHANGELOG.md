@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.9.0
+
+Bump of external dependencies.
+
 ## v0.8.0
 
 Bumps the `s3-simple` dependency and adds `:` as an allowed character to the `EncKeyId` validation regex.
