@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.10.0
+
+Bumps some dependencies to get rid of security vulnerabilities. MSRV was bumped to `1.88.0`.
+
 ## v0.9.0
 
 Bump of external dependencies.

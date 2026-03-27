@@ -41,7 +41,7 @@ impl EncStreamReader for MemoryReader {
         };
 
         let mut chunks_total = value_len / chunk_size;
-        if value_len % chunk_size > 0 {
+        if !value_len.is_multiple_of(chunk_size) {
             chunks_total += 1;
         }
 

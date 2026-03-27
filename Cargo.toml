@@ -1,8 +1,8 @@
 [package]
 name = "cryptr"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
-rust-version = "1.85.1"
+rust-version = "1.88"
 license = "Apache-2.0"
 authors = ["Sebastian Dobe <sebastiandobe@mailbox.org"]
 categories = ["command-line-utilities", "cryptography", "data-structures"]
@@ -17,23 +17,26 @@ all-features = true
 [features]
 default = []
 cli = ["s3", "streaming", "dep:clap", "dep:colored", "dep:home", "dep:rpassword"]
-s3 = ["streaming", "dep:reqwest", "dep:s3-simple", "dep:tokio-util"]
+s3 = ["streaming", "dep:reqwest", "dep:s3-simple", "dep:tokio-util", "dep:quinn-proto"]
 streaming = ["dep:reqwest"]
+
+[patch.crates-io]
+s3-simple = { path = "../s3-simple" }
 
 [dependencies]
 async-stream = "0.3.5"
 async-trait = "0.1.74"
 base64 = "0.22.0"
 bincode = "2"
-bytes = "1.5.0"
+bytes = "1.11.1"
 dotenvy = "0.15.7"
-flume = "0.11.0"
+flume = "0.12"
 futures = "0.3.29"
 thiserror = "2"
 tokio = { version = "1.35.0", features = ["fs", "io-std", "macros", "rt-multi-thread"] }
 tracing = { version = "0.1.40", features = ["attributes"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "tracing"] }
-rand = { version = "0.9.1", features = [] }
+rand = { version = "0.10", features = [] }
 regex = "1.10.2"
 
 # cli
@@ -43,10 +46,10 @@ home = { version = "0.5.5", optional = true }
 rpassword = { version = "7.3.1", optional = true }
 
 # s3
-reqwest = { version = "0.12.3", optional = true, default-features = false, features = [
-    "json", "rustls-tls", "stream"
+reqwest = { version = "0.13.2", optional = true, default-features = false, features = [
+    "json", "rustls", "stream"
 ] }
-s3-simple = { version = "0.7", optional = true }
+s3-simple = { version = "0.8.0", optional = true }
 tokio-util = { version = "0.7.10", optional = true, features = ["io"] }
 
 # std
@@ -56,6 +59,13 @@ chacha20poly1305 = { version = "0.10.1", features = ["std", "stream"] }
 # fix minimal versions
 # sharded-slab
 lazy_static = "1.1.0"
+
+# security issues
+#
+# Not even used at all, but cargo audit will alert on lower quinn versions.
+# Can be removed in the future.
+quinn-proto = { version = "0.11.14", optional = true }
+
 
 [dev-dependencies]
 cryptr = { path = ".", features = ["cli"] }
