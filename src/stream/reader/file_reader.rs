@@ -127,7 +127,7 @@ impl EncStreamReader for FileReader<'_> {
         file.seek(SeekFrom::Start(payload_offset)).await?;
 
         let mut chunks_total = payload_len / chunk_size;
-        if payload_len % chunk_size > 0 {
+        if !payload_len.is_multiple_of(chunk_size) {
             chunks_total += 1;
         }
 
