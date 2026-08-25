@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.11.0
+
+- Rust edition bumped internally to 2024.
+- Several dependencies have been bumped.
+- This version removes the pre-built binaries from the repo, as they make little sense here. They were added in the very
+  early stages for testing and ease of use.
+
 ## v0.10.0
 
 Bumps some dependencies to get rid of security vulnerabilities. MSRV was bumped to `1.88.0`.
@@ -39,19 +46,19 @@ converted between formats:
 
 ## v0.6.0
 
-All dependencies have been bumped to the latest versions to fix some security advisories for `ring` and `tokio`.
-The MSRV has been bumped to `1.85.1`.
+All dependencies have been bumped to the latest versions to fix some security advisories for `ring` and `tokio`. The
+MSRV has been bumped to `1.85.1`.
 
 ## v0.5.1
 
-Adds pub re-exports of the `s3-simple` API with `s3` feature enabled.
-This is now reachable via `cryptr::stream::s3::*` to be able to create
+Adds pub re-exports of the `s3-simple` API with `s3` feature enabled. This is now reachable via `cryptr::stream::s3::*`
+to be able to create
 `s3` readers and writers again.
 
 ## v0.5.0
 
-A migration from `rusty_s3` to `s3-simple` for S3 requests has been done.
-This brings additional compatibility with for instance [Garage](https://garagehq.deuxfleurs.fr/)
+A migration from `rusty_s3` to `s3-simple` for S3 requests has been done. This brings additional compatibility with for
+instance [Garage](https://garagehq.deuxfleurs.fr/)
 and gets rid of pre-signed URLs in favor of signed headers, which is a more secure approach.
 
 ## v0.4.0
@@ -61,16 +68,15 @@ and gets rid of pre-signed URLs in favor of signed headers, which is a more secu
 
 ## v0.3.0
 
-- fix an offset bug in the `S3Reader` which would cause an in-flight decryption to
-  fail on the last chunk
+- fix an offset bug in the `S3Reader` which would cause an in-flight decryption to fail on the last chunk
 - optimized the performance of the `S3Reader`
 - cleaner error logging when using the CLI
 - bump external dependencies
 
 ## v0.2.2
 
-Make it compile on Windows systems with `cli` or `streaming` features.
-The before implementation for reading the filesize in `FileReader` was unix specific.
+Make it compile on Windows systems with `cli` or `streaming` features. The before implementation for reading the
+filesize in `FileReader` was unix specific.
 
 ## v0.2.1
 

@@ -70,6 +70,7 @@ build-binaries: build
     #!/usr/bin/env bash
     set -euxo pipefail
 
+    mkdir out
     cp target/x86_64-unknown-linux-musl/release/cryptr out/cryptr_{{ TAG }}
     cp target/x86_64-pc-windows-gnu/release/cryptr.exe out/cryptr_{{ TAG }}.exe
 
@@ -81,7 +82,7 @@ msrv-verify:
 
 # find's the new MSRV, if it needs a bump
 msrv-find:
-    cargo msrv find --min 1.85.1
+    cargo msrv find --min $(cat Cargo.toml | grep '^rust-version =' | cut -d " " -f3 | xargs)
 
 # verify thats everything is good
 verify: check test-full build msrv-verify
@@ -97,7 +98,7 @@ verfiy-is-clean: verify
     echo all good
 
 # sets a new git tag and pushes it
-release: verfiy-is-clean build-binaries
+release: verfiy-is-clean
     #!/usr/bin/env bash
     set -euxo pipefail
 
@@ -108,9 +109,6 @@ release: verfiy-is-clean build-binaries
 publish: verfiy-is-clean
     #!/usr/bin/env bash
     set -euxo pipefail
-
-    # We must delete the pre-built binaries to not push them to crates.io
-    rm -rf out/*
 
     cargo publish
 
