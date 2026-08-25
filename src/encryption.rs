@@ -1,22 +1,25 @@
+use crate::CryptrError;
 use crate::value::{EncAlg, EncVersion};
 use bytes::{BufMut, Bytes, BytesMut};
-use chacha20poly1305::aead::{Aead, OsRng};
-use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Key, KeyInit, Nonce};
+use chacha20poly1305::aead::{Aead, Generate};
+use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
 
-use crate::CryptrError;
 #[cfg(feature = "streaming")]
 use crate::{
     stream::{LastStreamElement, StreamChunk},
     value::CHANNELS,
 };
 #[cfg(feature = "streaming")]
-use chacha20poly1305::aead;
+use aead_stream::aead::{array, consts};
 #[cfg(feature = "streaming")]
 use tracing::{debug, error};
 
 #[cfg(feature = "streaming")]
 type StreamReceiver =
     Result<flume::Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>, CryptrError>;
+
+#[cfg(feature = "streaming")]
+pub(crate) type ChaChaKey = array::Array<u8, consts::U32>;
 
 pub(crate) static MAC_SIZE_CHACHA_STREAM: u8 = 16;
 pub(crate) static NONCE_SIZE_CHACHA: u8 = 12;
@@ -104,8 +107,8 @@ pub(crate) fn encrypt_stream(
     version: &EncVersion,
     alg: &EncAlg,
     rx: flume::Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>,
-    key: Vec<u8>,
-    nonce: Vec<u8>,
+    key: ChaChaKey,
+    nonce: &[u8],
     first_data: Bytes,
 ) -> StreamReceiver {
     match version {
@@ -120,8 +123,8 @@ pub(crate) fn decrypt_stream(
     version: &EncVersion,
     alg: &EncAlg,
     rx: flume::Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>,
-    key: Vec<u8>,
-    nonce: Vec<u8>,
+    key: ChaChaKey,
+    nonce: &[u8],
 ) -> StreamReceiver {
     match version {
         EncVersion::V1 => match alg {
@@ -132,20 +135,26 @@ pub(crate) fn decrypt_stream(
 
 #[inline]
 fn decrypt_chacha_v1(ciphertext: &mut Bytes, key: &[u8]) -> Result<Bytes, CryptrError> {
-    let k = Key::from_slice(key);
-    let cipher = ChaCha20Poly1305::new(k);
+    let k = Key::try_from(key)
+        .map_err(|_| CryptrError::Decryption("Cannot create decryption key from bytes"))?;
+    let cipher = ChaCha20Poly1305::new(&k);
     // 96 bits nonce is always the first bytes
     let nonce = ciphertext.split_to(NONCE_SIZE_CHACHA.into());
-    let nonce = Nonce::from_slice(nonce.as_ref());
-    let plaintext = cipher.decrypt(nonce, ciphertext.as_ref())?;
+    let plaintext = cipher.decrypt(
+        nonce.as_ref().try_into().map_err(|err| {
+            CryptrError::Generic(format!("Cannot create Nonce from input: {err}"))
+        })?,
+        ciphertext.as_ref(),
+    )?;
     Ok(Bytes::from(plaintext))
 }
 
 #[inline]
 fn encrypt_chacha_v1(plain: &[u8], key: &[u8]) -> Result<Bytes, CryptrError> {
-    let k = Key::from_slice(key);
-    let cipher = ChaCha20Poly1305::new(k);
-    let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
+    let k = Key::try_from(key)
+        .map_err(|_| CryptrError::Encryption("Cannot create encryption key from bytes"))?;
+    let cipher = ChaCha20Poly1305::new(&k);
+    let nonce = chacha20poly1305::Nonce::generate();
     let ciphertext = cipher.encrypt(&nonce, plain)?;
 
     let mut buf = BytesMut::with_capacity(nonce.len() + ciphertext.len());
@@ -159,11 +168,19 @@ fn encrypt_chacha_v1(plain: &[u8], key: &[u8]) -> Result<Bytes, CryptrError> {
 #[inline]
 fn encrypt_chacha_stream_v1(
     rx: flume::Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>,
-    key: Vec<u8>,
-    nonce: Vec<u8>,
+    key: ChaChaKey,
+    nonce: &[u8],
     first_data: Bytes,
 ) -> StreamReceiver {
     let (tx_cipher, rx_cipher) = flume::bounded(CHANNELS);
+
+    let aead = ChaCha20Poly1305::new(&key);
+    let mut encryptor = aead_stream::EncryptorBE32::from_aead(
+        aead,
+        nonce
+            .try_into()
+            .map_err(|err| CryptrError::Generic(format!("Cannot build Nonce from slice: {err}")))?,
+    );
 
     tokio::spawn(async move {
         // before doing anything else, send the header data unencrypted
@@ -174,10 +191,6 @@ fn encrypt_chacha_stream_v1(
             )))
             .await
             .unwrap();
-
-        let key = Key::from_slice(key.as_slice());
-        let aead = ChaCha20Poly1305::new(key);
-        let mut encryptor = aead::stream::EncryptorBE32::from_aead(aead, nonce.as_slice().into());
 
         let mut payload_last = StreamChunk::new(Vec::default());
         while let Ok(Ok((is_last, mut payload))) = rx.recv_async().await {
@@ -251,15 +264,20 @@ fn encrypt_chacha_stream_v1(
 #[inline]
 fn decrypt_chacha_channel_stream_v1(
     rx: flume::Receiver<Result<(LastStreamElement, StreamChunk), CryptrError>>,
-    key: Vec<u8>,
-    nonce: Vec<u8>,
+    key: ChaChaKey,
+    nonce: &[u8],
 ) -> StreamReceiver {
     let (tx_plain, rx_plain) = flume::bounded(CHANNELS);
-    tokio::spawn(async move {
-        let key = Key::from_slice(key.as_slice());
-        let aead = ChaCha20Poly1305::new(key);
-        let mut decryptor = aead::stream::DecryptorBE32::from_aead(aead, nonce.as_slice().into());
 
+    let aead = ChaCha20Poly1305::new(&key);
+    let mut decryptor = aead_stream::DecryptorBE32::from_aead(
+        aead,
+        nonce
+            .try_into()
+            .map_err(|err| CryptrError::Generic(format!("Cannot build Nonce from slice: {err}")))?,
+    );
+
+    tokio::spawn(async move {
         let mut payload_last = StreamChunk::new(Vec::default());
         while let Ok(Ok((is_last, mut payload))) = rx.recv_async().await {
             if is_last == LastStreamElement::Yes {

@@ -1,6 +1,6 @@
 use cryptr::CryptrError;
 use std::fmt::Write;
-use tokio::io::{stdin, AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader, stdin};
 
 /// Reads a line from stdin
 pub(crate) async fn read_line_stdin() -> Result<String, CryptrError> {
@@ -23,7 +23,7 @@ pub(crate) async fn read_line_stdin() -> Result<String, CryptrError> {
             None => {
                 return Err(CryptrError::Cli(
                     "Error reading line from stdin".to_string(),
-                ))
+                ));
             }
             Some(data) => write!(res, "{data}")?,
         }
@@ -115,15 +115,15 @@ impl PromptPassword {
             return Err(CryptrError::Cli(self.policy_str()?));
         }
 
-        if let Some(min) = self.min_len {
-            if password.len() < min {
-                return Err(CryptrError::Cli(self.policy_str()?));
-            }
+        if let Some(min) = self.min_len
+            && password.len() < min
+        {
+            return Err(CryptrError::Cli(self.policy_str()?));
         }
-        if let Some(max) = self.max_len {
-            if password.len() > max {
-                return Err(CryptrError::Cli(self.policy_str()?));
-            }
+        if let Some(max) = self.max_len
+            && password.len() > max
+        {
+            return Err(CryptrError::Cli(self.policy_str()?));
         }
 
         let mut contains_lower = 0;
@@ -139,20 +139,20 @@ impl PromptPassword {
             }
         }
 
-        if let Some(lower) = self.contains_lowercase {
-            if contains_lower < lower {
-                return Err(CryptrError::Cli(self.policy_str()?));
-            }
+        if let Some(lower) = self.contains_lowercase
+            && contains_lower < lower
+        {
+            return Err(CryptrError::Cli(self.policy_str()?));
         }
-        if let Some(upper) = self.contains_uppercase {
-            if contains_upper < upper {
-                return Err(CryptrError::Cli(self.policy_str()?));
-            }
+        if let Some(upper) = self.contains_uppercase
+            && contains_upper < upper
+        {
+            return Err(CryptrError::Cli(self.policy_str()?));
         }
-        if let Some(digit) = self.contains_digit {
-            if contains_digit < digit {
-                return Err(CryptrError::Cli(self.policy_str()?));
-            }
+        if let Some(digit) = self.contains_digit
+            && contains_digit < digit
+        {
+            return Err(CryptrError::Cli(self.policy_str()?));
         }
 
         Ok(())

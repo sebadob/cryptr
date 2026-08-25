@@ -1,13 +1,13 @@
 use crate::encryption::{ChunkSizeKb, MAC_SIZE_CHACHA_STREAM, NONCE_SIZE_CHACHA};
 use crate::kdf::KdfValue;
 use crate::keys::EncKeys;
-use crate::{encryption, CryptrError};
+use crate::{CryptrError, encryption};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::fmt::Debug;
 use tokio::fs;
 
 #[cfg(feature = "streaming")]
-use crate::stream::{reader::StreamReader, writer::StreamWriter, EncStreamReader, EncStreamWriter};
+use crate::stream::{EncStreamReader, EncStreamWriter, reader::StreamReader, writer::StreamWriter};
 #[cfg(feature = "streaming")]
 use crate::utils::secure_random_vec;
 #[cfg(feature = "streaming")]
@@ -480,7 +480,9 @@ impl EncValue {
         enc_key_id: String,
     ) -> Result<(), CryptrError> {
         let header = EncValueHeader::from_enc_key_id(enc_key_id, Some(chunk_size_kb.clone()));
-        let key = EncKeys::get_static_key(&header.enc_key_id)?.to_vec();
+        let key = EncKeys::get_static_key(&header.enc_key_id)?
+            .try_into()
+            .map_err(|err| CryptrError::Generic(format!("Cannot create ChaCha Key: {err}")))?;
         Self::encrypt_stream_with_data(reader, writer, chunk_size_kb, header, key).await
     }
 
@@ -494,7 +496,12 @@ impl EncValue {
         enc_key: Vec<u8>,
     ) -> Result<(), CryptrError> {
         let header = EncValueHeader::from_enc_key_id(enc_key_id, Some(chunk_size_kb.clone()));
-        Self::encrypt_stream_with_data(reader, writer, chunk_size_kb, header, enc_key).await
+        let key: encryption::ChaChaKey = enc_key
+            .as_slice()
+            .try_into()
+            .map_err(|err| CryptrError::Generic(format!("Cannot create ChaCha Key: {err}")))?;
+
+        Self::encrypt_stream_with_data(reader, writer, chunk_size_kb, header, key).await
     }
 
     /// Streaming encryption with password and custom chunk size
@@ -506,16 +513,16 @@ impl EncValue {
         password: &str,
     ) -> Result<(), CryptrError> {
         let kdf_value = KdfValue::new(password);
+
         let header =
             EncValueHeader::from_enc_key_id(kdf_value.enc_key_value(), Some(chunk_size_kb.clone()));
-        Self::encrypt_stream_with_data(
-            reader,
-            writer,
-            ChunkSizeKb::default(),
-            header,
-            kdf_value.value(),
-        )
-        .await
+        let key: encryption::ChaChaKey = kdf_value
+            .value()
+            .as_slice()
+            .try_into()
+            .map_err(|err| CryptrError::Generic(format!("Cannot create ChaCha Key: {err}")))?;
+
+        Self::encrypt_stream_with_data(reader, writer, ChunkSizeKb::default(), header, key).await
     }
 
     async fn encrypt_stream_with_data(
@@ -523,7 +530,7 @@ impl EncValue {
         writer: StreamWriter<'_>,
         chunk_size_kb: ChunkSizeKb,
         header: EncValueHeader,
-        key: Vec<u8>,
+        key: encryption::ChaChaKey,
     ) -> Result<(), CryptrError> {
         // chacha20 stream cipher nonce is 7 bytes
         let nonce_size = header.alg.nonce_size_stream() as usize;
@@ -541,7 +548,7 @@ impl EncValue {
         // start up the encryption middleware
         let (tx_enc_to_stream, rx_enc_to_stream) = flume::bounded(CHANNELS);
         let rx_enc_from_stream =
-            encryption::encrypt_stream(&version, &alg, rx_enc_to_stream, key, nonce, first_data)?;
+            encryption::encrypt_stream(&version, &alg, rx_enc_to_stream, key, &nonce, first_data)?;
 
         let reader_handle = match reader {
             StreamReader::Channel(r) => r.spawn_reader_encryption(chunk_size_kb, tx_enc_to_stream),
@@ -623,23 +630,27 @@ impl EncValue {
 
         let version = header.version.clone();
         let alg = header.alg.clone();
-        let key = if let Some(params) = KdfValue::try_enc_key_to_params(&header.enc_key_id) {
-            if let Some(password) = password {
-                KdfValue::new_with_params(password, params).value()
-            } else if let Some(enc_keys) = enc_keys {
-                enc_keys.get_key(&header.enc_key_id)?.to_vec()
+        let key: encryption::ChaChaKey =
+            if let Some(params) = KdfValue::try_enc_key_to_params(&header.enc_key_id) {
+                if let Some(password) = password {
+                    KdfValue::new_with_params(password, params).value()
+                } else if let Some(enc_keys) = enc_keys {
+                    enc_keys.get_key(&header.enc_key_id)?.to_vec()
+                } else {
+                    return Err(CryptrError::Decryption(
+                        "Stream has been encrypted with a password, but none was given",
+                    ));
+                }
             } else {
-                return Err(CryptrError::Decryption(
-                    "Stream has been encrypted with a password, but none was given",
-                ));
+                EncKeys::get_static_key(&header.enc_key_id)?.to_vec()
             }
-        } else {
-            EncKeys::get_static_key(&header.enc_key_id)?.to_vec()
-        };
+            .as_slice()
+            .try_into()
+            .map_err(|err| CryptrError::Generic(format!("Cannot create ChaCha Key: {err}")))?;
 
         // start the decryption middleware
         let rx_from_decryptor_to_writer =
-            encryption::decrypt_stream(&version, &alg, rx_to_decryptor, key, nonce)?;
+            encryption::decrypt_stream(&version, &alg, rx_to_decryptor, key, &nonce)?;
 
         // start the writer
         match writer {
