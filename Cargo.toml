@@ -41,7 +41,7 @@ streaming = [
 ]
 
 [patch.crates-io]
-#s3-simple = { path = "../s3-simple" }
+##s3-simple = { path = "../s3-simple" }
 
 [dependencies]
 base64 = "0.23"
