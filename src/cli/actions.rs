@@ -37,14 +37,27 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
         None => {
             let bytes = match action {
                 Action::Encrypt => {
-                    println!("Paste the secret you want to encrypt:");
-                    let input = utils::read_line_stdin().await?;
-                    input.as_bytes().to_vec()
+                    println!("Paste the secret you want to encrypt (end with Ctrl-D):");
+                    let mut input = utils::read_stdin_all().await?;
+                    // a trailing line terminator from a pipe/paste is not part of the secret
+                    if input.last() == Some(&b'\n') {
+                        input.pop();
+                        if input.last() == Some(&b'\r') {
+                            input.pop();
+                        }
+                    }
+                    input
                 }
                 Action::Decrypt => {
-                    println!("Paste the base64 encoded secret you want to decrypt:");
-                    let input = utils::read_line_stdin().await?;
-                    b64_decode(&input)?
+                    println!("Paste the base64 encoded secret you want to decrypt (end with Ctrl-D):");
+                    let input = utils::read_stdin_all().await?;
+                    // base64 is ASCII text; strip whitespace so multi-line pastes decode
+                    let compact: String = input
+                        .iter()
+                        .filter(|b| !b.is_ascii_whitespace())
+                        .map(|&b| b as char)
+                        .collect();
+                    b64_decode(&compact)?
                 }
             };
 
@@ -171,8 +184,12 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
                 println!("\nBase64 encoded encrypted secret:\n{s}")
             }
             Action::Decrypt => {
-                let s = String::from_utf8_lossy(&writer_memory_buf);
-                println!("\nDecrypted plain text secret:\n{s}")
+                // write raw bytes so binary secrets are not mangled
+                use std::io::Write;
+                let mut stdout = std::io::stdout();
+                let _ = writeln!(stdout, "\nDecrypted plain text secret:");
+                let _ = stdout.write_all(&writer_memory_buf);
+                let _ = stdout.flush();
             }
         }
     }
@@ -220,7 +237,7 @@ pub async fn new_random_key(args: ArgsKeysNew) -> Result<(), CryptrError> {
     let id = keys.enc_key_active.yellow().on_black();
     println!("{msg} {id}");
 
-    let mut config = EncConfig::read().await.unwrap_or_default();
+    let mut config = EncConfig::read_or_default().await?;
     config.enc_keys = keys;
     config.save().await?;
     println!("Config has been updated");
@@ -308,15 +325,15 @@ pub async fn export_keys(args: ArgsKeysExport) -> Result<(), CryptrError> {
                     "Current active key is not in exported keys, which ID should be the new active?"
                 );
 
-                for i in 1..=keys_len {
+                for i in 0..keys_len {
                     let (id, _) = keys.enc_keys.get(i).unwrap();
-                    println!("{i} : {id}");
+                    println!("{} : {id}", i + 1);
                 }
 
                 let mut input;
                 print!(
                     "\nEnter the number of the key you want to set as active (1 - {})? ",
-                    keys_len + 1
+                    keys_len
                 );
                 loop {
                     input = utils::read_line_stdin().await?;
@@ -333,7 +350,7 @@ pub async fn export_keys(args: ArgsKeysExport) -> Result<(), CryptrError> {
                         Err(_) => {
                             eprint!(
                                 "\nEnter a valid number of the key you want to set as active (1 - {})? ",
-                                keys_len + 1
+                                keys_len
                             );
                         }
                     }
@@ -384,23 +401,12 @@ pub async fn import_keys(args: ArgsKeysImport) -> Result<(), CryptrError> {
 
     let config = match EncConfig::read().await {
         Ok(mut config) => {
-            let existing_ids = config
-                .enc_keys
-                .enc_keys
-                .iter()
-                .map(|(id, _)| id.clone())
-                .collect::<Vec<String>>();
-
-            for key in keys.enc_keys {
-                // check for duplicates
-                if existing_ids.contains(&key.0) {
-                    let msg = format!("Skipping already existing Key ID '{}'", key.0)
-                        .yellow()
-                        .on_black();
-                    eprintln!("{msg}");
-                } else {
-                    config.enc_keys.enc_keys.push(key);
-                }
+            let skipped = config.enc_keys.merge_in(&keys.enc_keys);
+            for id in &skipped {
+                let msg = format!("Skipping already existing Key ID '{id}'")
+                    .yellow()
+                    .on_black();
+                eprintln!("{msg}");
             }
             config
         }
@@ -520,7 +526,7 @@ pub async fn s3_show() -> Result<(), CryptrError> {
 }
 
 pub async fn s3_update() -> Result<(), CryptrError> {
-    let mut config = EncConfig::read().await.unwrap_or_default();
+    let mut config = EncConfig::read_or_default().await?;
 
     println!(
         "\nIn the following steps, you wil be able to update your S3 config.\n\

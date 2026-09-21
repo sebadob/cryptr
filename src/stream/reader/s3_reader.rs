@@ -69,6 +69,13 @@ impl EncStreamReader for S3Reader<'_> {
                 return Err(CryptrError::S3(msg));
             }
 
+            // an empty object produces exactly one empty last chunk
+            if data.is_none() {
+                tx.send_async(Ok((LastStreamElement::Yes, StreamChunk(Vec::new()))))
+                    .await?;
+                return Ok(());
+            }
+
             let chunk_size = chunk_size.value_bytes() as usize;
             let mut buf = BytesMut::with_capacity(chunk_size);
             let mut total = 0;
@@ -148,7 +155,11 @@ impl EncStreamReader for S3Reader<'_> {
         tokio::spawn(async move {
             match rx_init.recv_async().await {
                 Ok(payload) => {
-                    tx_init.send(payload).expect("tx_init to work properly");
+                    // best-effort: if the receiver is already gone, the chunk channel
+                    // below will fail and the reader task exits with an error
+                    if let Err(err) = tx_init.send(payload) {
+                        debug!("tx_init receiver dropped in reader: {err:?}");
+                    }
                 }
                 Err(err) => {
                     error!("tx_init closed in reader: {err:?}");
@@ -164,6 +175,13 @@ impl EncStreamReader for S3Reader<'_> {
             let mut data = stream.next().await;
             if let Some(Err(err)) = &data {
                 let msg = format!("S3 bucket error: {err}");
+                tx.send_async(Err(CryptrError::S3(msg.clone()))).await?;
+                return Err(CryptrError::S3(msg));
+            }
+
+            // an empty object cannot contain an encryption header
+            if data.is_none() {
+                let msg = "S3 object is empty - no encryption header found".to_string();
                 tx.send_async(Err(CryptrError::S3(msg.clone()))).await?;
                 return Err(CryptrError::S3(msg));
             }
@@ -184,35 +202,55 @@ impl EncStreamReader for S3Reader<'_> {
                 let _ = tx_progress.send(total);
 
                 // usually, the first chunk should always be big enough to extract the full
-                // encryption header
-                if header.is_none() {
-                    let (enc_header, nonce, payload_offset) =
-                        match EncValueHeader::try_extract_with_nonce(buf.as_ref()) {
-                            Ok(d) => d,
-                            Err(err) => {
-                                let msg = format!(
-                                    "Error extracting encryption header from first chunk: {err:?}"
-                                );
-                                tx.send_async(Err(CryptrError::S3(msg.clone()))).await?;
-                                return Err(CryptrError::S3(msg));
+                // encryption header - if not, keep accumulating stream data until it is
+                while header.is_none() {
+                    match EncValueHeader::try_extract_with_nonce(buf.as_ref()) {
+                        Ok((enc_header, nonce, payload_offset)) => {
+                            debug!(
+                                "Extracted header data from stream: {enc_header:?} with \
+                                payload_offset: {payload_offset}"
+                            );
+
+                            // initialize the streaming manager
+                            tx_init_internal
+                                .send((enc_header.clone(), nonce))
+                                .expect("tx_init_internal to be only called once");
+
+                            // strip the header from the payload and set the correct chunk size
+                            let _header_bytes = buf.split_to(payload_offset as usize);
+                            chunk_size = enc_header
+                                .chunk_size
+                                .value_bytes_with_mac(&enc_header.alg) as usize;
+
+                            header = Some(enc_header);
+                        }
+                        Err(err) => {
+                            debug!("Header extraction incomplete, fetching more data: {err:?}");
+                            data = stream.next().await;
+                            match &data {
+                                None => {
+                                    let msg = format!(
+                                        "Error extracting encryption header from stream: \
+                                         {err:?}"
+                                    );
+                                    tx.send_async(Err(CryptrError::S3(msg.clone()))).await?;
+                                    return Err(CryptrError::S3(msg));
+                                }
+                                Some(res) => {
+                                    if res.is_err() {
+                                        debug!("stream rest in loop error: {res:?}");
+                                        tx.send_async(Err(CryptrError::S3(format!("{res:?}"))))
+                                            .await?;
+                                        return Err(CryptrError::S3(format!("{res:?}")));
+                                    }
+                                }
                             }
-                        };
-                    debug!(
-                        "Extracted header data from first chunk: {enc_header:?} with \
-                        payload_offset: {payload_offset}"
-                    );
-
-                    // initialize the streaming manager
-                    tx_init_internal
-                        .send((enc_header.clone(), nonce))
-                        .expect("tx_init_internal to be only called once");
-
-                    // strip the header from the payload and set the correct chunk size
-                    let _header_bytes = buf.split_to(payload_offset as usize);
-                    chunk_size =
-                        enc_header.chunk_size.value_bytes_with_mac(&enc_header.alg) as usize;
-
-                    header = Some(enc_header);
+                            let bytes = data.unwrap().unwrap();
+                            total += bytes.len();
+                            buf.extend(bytes);
+                            let _ = tx_progress.send(total);
+                        }
+                    }
                 }
 
                 data = stream.next().await;

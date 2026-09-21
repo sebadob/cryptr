@@ -55,11 +55,28 @@ impl EncStreamReader for ChannelReader {
         let handle: JoinHandle<Result<(), CryptrError>> = tokio::spawn(async move {
             let mut total = 0;
 
-            let Some(Ok(mut buf)) = self.0.next().await else {
-                return Err(CryptrError::Encryption(
-                    "Received no data inside ChannelReader",
-                ));
+            let mut buf = match self.0.next().await {
+                Some(Ok(buf)) => buf,
+                None => {
+                    return Err(CryptrError::Encryption(
+                        "Received no data inside ChannelReader",
+                    ));
+                }
+                // forward the original error over the stream channel, so the caller sees
+                // it instead of a generic "no data" / "channel closed" message
+                Some(Err(err)) => {
+                    let _ = tx.send_async(Err(err)).await;
+                    return Ok(());
+                }
             };
+
+            // an empty first chunk is the documented "done" signal - emit exactly one
+            // final empty block and stop, instead of sending an empty non-final block
+            if buf.is_empty() {
+                let chunk = StreamChunk::new(Vec::new());
+                tx.send_async(Ok((LastStreamElement::Yes, chunk))).await?;
+                return Ok(());
+            }
 
             let chunk_size = buf.len();
             debug!("Using {chunk_size} as chunk size");
@@ -81,8 +98,11 @@ impl EncStreamReader for ChannelReader {
                             (false, LastStreamElement::No, bytes)
                         }
                     }
+                    // forward the original error over the stream channel, so the caller sees
+                    // it instead of a generic "channel closed" message
                     Some(Err(err)) => {
-                        return Err(err);
+                        let _ = tx.send_async(Err(err)).await;
+                        return Ok(());
                     }
                 };
 
@@ -93,6 +113,20 @@ impl EncStreamReader for ChannelReader {
 
                 if is_last {
                     break;
+                }
+
+                // a chunk larger than the first one violates the ChannelReader contract and
+                // would shift AEAD boundaries from this point on
+                if bytes.len() > len {
+                    let _ = tx.send_async(Err(CryptrError::Encryption(
+                        "Received a chunk larger than the first stream element - \
+                         ChannelReader contract violation",
+                    )))
+                    .await;
+                    return Err(CryptrError::Encryption(
+                        "Received a chunk larger than the first stream element - \
+                         ChannelReader contract violation",
+                    ));
                 }
 
                 // if the chunk is smaller than the ones before, it can only be the last one

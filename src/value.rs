@@ -134,8 +134,12 @@ impl EncValueHeader {
 
         // id_len is the full header length: first 4 fields -> 6 bytes
         let id_len = usize::from(length - 6);
+        if buf.remaining() < id_len {
+            return Err(CryptrError::Deserialization("Invalid Enc Header"));
+        }
         let id_buf = buf.split_to(id_len);
-        let enc_key_id = String::from_utf8_lossy(id_buf.as_ref()).to_string();
+        let enc_key_id = String::from_utf8(id_buf.to_vec())
+            .map_err(|_| CryptrError::HeaderInvalid("EncKey ID is not valid UTF-8"))?;
 
         Ok(Self {
             version,
@@ -182,17 +186,33 @@ impl EncValueHeader {
         Ok((header, nonce, offset))
     }
 
-    pub(crate) fn from_enc_key_id(enc_key_id: String, chunk_size: Option<ChunkSizeKb>) -> Self {
-        let length = 6 + enc_key_id.len();
-        let chunk_size = chunk_size.unwrap_or(ChunkSizeKb::try_from(0).unwrap());
+    pub(crate) fn from_enc_key_id(
+        enc_key_id: String,
+        chunk_size: Option<ChunkSizeKb>,
+    ) -> Result<Self, CryptrError> {
+        let id_len = enc_key_id.len();
+        if id_len < 2 {
+            // decryption rejects headers with length < 8 (i.e. ID < 2 bytes), so such IDs
+            // could never be decrypted again - reject them at construction time
+            return Err(CryptrError::Encryption(
+                "EncKey ID too short (minimum 2 bytes)",
+            ));
+        }
+        if id_len > 65_529 {
+            // the header length field is u16 and holds 6 fixed bytes + the ID
+            return Err(CryptrError::Encryption(
+                "EncKey ID too long (maximum 65,529 bytes)",
+            ));
+        }
+        let chunk_size = chunk_size.unwrap_or(ChunkSizeKb::try_from(0)?);
 
-        Self {
+        Ok(Self {
             version: EncVersion::V1,
             alg: EncAlg::ChaCha20Poly1305,
-            length: length as u16,
+            length: (6 + id_len) as u16,
             chunk_size,
             enc_key_id,
-        }
+        })
     }
 }
 
@@ -224,7 +244,7 @@ impl EncValue {
     /// If `init()` has not been called on valid EncKeys once before
     pub fn encrypt(value: &[u8]) -> Result<Self, CryptrError> {
         let enc_key_id = EncKeys::get_static().enc_key_active.clone();
-        let header = EncValueHeader::from_enc_key_id(enc_key_id, None);
+        let header = EncValueHeader::from_enc_key_id(enc_key_id, None)?;
         let key = EncKeys::get_static_key(&header.enc_key_id)?;
         let payload = encryption::encrypt(&header.version, &header.alg, value, key)?;
 
@@ -235,7 +255,7 @@ impl EncValue {
     pub fn encrypt_with_password(value: &[u8], password: &str) -> Result<Self, CryptrError> {
         let kdf_value = KdfValue::new(password);
         let enc_key_id = kdf_value.enc_key_value();
-        let header = EncValueHeader::from_enc_key_id(enc_key_id, None);
+        let header = EncValueHeader::from_enc_key_id(enc_key_id, None)?;
         let key = kdf_value.value();
         let payload = encryption::encrypt(&header.version, &header.alg, value, &key)?;
 
@@ -249,7 +269,7 @@ impl EncValue {
     /// If `init()` has not been called on valid EncKeys once before
     pub async fn encrypt_to_file(value: &[u8], path: &str) -> Result<(), CryptrError> {
         let enc_key_id = EncKeys::get_static().enc_key_active.clone();
-        let header = EncValueHeader::from_enc_key_id(enc_key_id, None);
+        let header = EncValueHeader::from_enc_key_id(enc_key_id, None)?;
         let key = EncKeys::get_static_key(&header.enc_key_id)?;
         let payload = encryption::encrypt(&header.version, &header.alg, value, key)?;
 
@@ -266,7 +286,7 @@ impl EncValue {
         password: &str,
     ) -> Result<(), CryptrError> {
         let kdf_value = KdfValue::new(password);
-        let header = EncValueHeader::from_enc_key_id(kdf_value.enc_key_value(), None);
+        let header = EncValueHeader::from_enc_key_id(kdf_value.enc_key_value(), None)?;
         let payload = encryption::encrypt(&header.version, &header.alg, value, &kdf_value.value())?;
 
         let bytes = Self { header, payload }.into_bytes();
@@ -279,7 +299,7 @@ impl EncValue {
     ///
     /// It will by default always take the active keys.
     pub fn encrypt_with_keys(value: &[u8], enc_keys: &EncKeys) -> Result<Self, CryptrError> {
-        let header = EncValueHeader::from_enc_key_id(enc_keys.enc_key_active.clone(), None);
+        let header = EncValueHeader::from_enc_key_id(enc_keys.enc_key_active.clone(), None)?;
         let key = enc_keys.get_key(&enc_keys.enc_key_active)?;
         let payload = encryption::encrypt(&header.version, &header.alg, value, key)?;
 
@@ -288,7 +308,7 @@ impl EncValue {
 
     /// Encrypt a value with a specific Key ID from the statically initialized encryption keys
     pub fn encrypt_with_key_id(value: &[u8], enc_key_id: String) -> Result<Self, CryptrError> {
-        let header = EncValueHeader::from_enc_key_id(enc_key_id, None);
+        let header = EncValueHeader::from_enc_key_id(enc_key_id, None)?;
         let key = EncKeys::get_static_key(&header.enc_key_id)?;
         let payload = encryption::encrypt(&header.version, &header.alg, value, key)?;
 
@@ -338,7 +358,10 @@ impl EncValue {
 
     /// Decrypt a value with a given password
     pub fn decrypt_with_password(mut self, password: &str) -> Result<Bytes, CryptrError> {
-        let kdf_value = KdfValue::new(password);
+        let params = KdfValue::try_enc_key_to_params(&self.header.enc_key_id).ok_or(
+            CryptrError::Password("EncKey ID is not a password-derived key"),
+        )?;
+        let kdf_value = KdfValue::new_with_params(password, params);
         let key = kdf_value.value();
         encryption::decrypt(
             &self.header.version,
@@ -354,7 +377,10 @@ impl EncValue {
         password: &str,
     ) -> Result<Bytes, CryptrError> {
         let header = EncValueHeader::try_extract(bytes)?;
-        let kdf_value = KdfValue::new(password);
+        let params = KdfValue::try_enc_key_to_params(&header.enc_key_id).ok_or(
+            CryptrError::Password("EncKey ID is not a password-derived key"),
+        )?;
+        let kdf_value = KdfValue::new_with_params(password, params);
         let key = kdf_value.value();
         let res = encryption::decrypt(&header.version, &header.alg, bytes, &key)?;
         Ok(res)
@@ -479,7 +505,7 @@ impl EncValue {
         chunk_size_kb: ChunkSizeKb,
         enc_key_id: String,
     ) -> Result<(), CryptrError> {
-        let header = EncValueHeader::from_enc_key_id(enc_key_id, Some(chunk_size_kb.clone()));
+        let header = EncValueHeader::from_enc_key_id(enc_key_id, Some(chunk_size_kb.clone()))?;
         let key = EncKeys::get_static_key(&header.enc_key_id)?
             .try_into()
             .map_err(|err| CryptrError::Generic(format!("Cannot create ChaCha Key: {err}")))?;
@@ -495,7 +521,7 @@ impl EncValue {
         enc_key_id: String,
         enc_key: Vec<u8>,
     ) -> Result<(), CryptrError> {
-        let header = EncValueHeader::from_enc_key_id(enc_key_id, Some(chunk_size_kb.clone()));
+        let header = EncValueHeader::from_enc_key_id(enc_key_id, Some(chunk_size_kb.clone()))?;
         let key: encryption::ChaChaKey = enc_key
             .as_slice()
             .try_into()
@@ -514,15 +540,17 @@ impl EncValue {
     ) -> Result<(), CryptrError> {
         let kdf_value = KdfValue::new(password);
 
-        let header =
-            EncValueHeader::from_enc_key_id(kdf_value.enc_key_value(), Some(chunk_size_kb.clone()));
+        let header = EncValueHeader::from_enc_key_id(
+            kdf_value.enc_key_value(),
+            Some(chunk_size_kb.clone()),
+        )?;
         let key: encryption::ChaChaKey = kdf_value
             .value()
             .as_slice()
             .try_into()
             .map_err(|err| CryptrError::Generic(format!("Cannot create ChaCha Key: {err}")))?;
 
-        Self::encrypt_stream_with_data(reader, writer, ChunkSizeKb::default(), header, key).await
+        Self::encrypt_stream_with_data(reader, writer, chunk_size_kb, header, key).await
     }
 
     async fn encrypt_stream_with_data(
@@ -686,7 +714,7 @@ mod tests {
 
     #[test]
     fn test_header_extract() {
-        let header = EncValueHeader::from_enc_key_id("my_id_123".to_string(), None);
+        let header = EncValueHeader::from_enc_key_id("my_id_123".to_string(), None).unwrap();
         assert_eq!(header.length, 15);
 
         let mut bytes: Bytes = header.clone().into_bytes();
@@ -750,6 +778,336 @@ mod tests {
         EncValue::decrypt_stream(reader, writer).await.unwrap();
         assert_eq!(data.len(), buf_dec.len());
         assert_eq!(data, buf_dec);
+    }
+
+    #[tokio::test]
+    async fn test_memory_to_memory_stream_password_custom_chunk_size() {
+        // F-16 regression: the password path must encrypt with the caller's chunk size,
+        // not ChunkSizeKb::default(). With data larger than the default 128 KiB chunk,
+        // a header/actual boundary mismatch makes decryption fail its MAC check.
+        let password = "123SuperSafe";
+        let data = secure_random_vec(300 * 1024).unwrap();
+        let chunk_size = ChunkSizeKb::try_from(256).unwrap();
+
+        // encrypt
+        let reader = StreamReader::Memory(MemoryReader(data.clone()));
+        let mut buf_enc = Vec::with_capacity(data.len());
+        let writer = StreamWriter::Memory(MemoryWriter(&mut buf_enc));
+        EncValue::encrypt_stream_with_chunk_size_and_password(reader, writer, chunk_size, password)
+            .await
+            .unwrap();
+
+        // decrypt
+        let reader = StreamReader::Memory(MemoryReader(buf_enc.clone()));
+        let mut buf_dec = Vec::with_capacity(data.len());
+        let writer = StreamWriter::Memory(MemoryWriter(&mut buf_dec));
+        EncValue::decrypt_stream_with_password(reader, writer, password)
+            .await
+            .unwrap();
+        assert_eq!(data, buf_dec);
+    }
+
+    #[tokio::test]
+    async fn test_empty_value_stream_roundtrip() {
+        // F-23 regression: an empty plaintext must not panic the reader (divide-by-zero
+        // on chunk_size 0) and must round-trip as header + nonce + one tag-only AEAD block
+        let _ = EncKeys::generate().unwrap().init();
+        let chunk_size = ChunkSizeKb::try_from(1).unwrap();
+        let data: Vec<u8> = Vec::new();
+
+        // encrypt
+        let reader = StreamReader::Memory(MemoryReader(data.clone()));
+        let mut buf_enc = Vec::with_capacity(64);
+        let writer = StreamWriter::Memory(MemoryWriter(&mut buf_enc));
+        EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size)
+            .await
+            .unwrap();
+        // minimum: header 8 + nonce 7 + tag-only AEAD block 16
+        assert!(buf_enc.len() >= 31);
+
+        // decrypt
+        let reader = StreamReader::Memory(MemoryReader(buf_enc.clone()));
+        let mut buf_dec = Vec::new();
+        let writer = StreamWriter::Memory(MemoryWriter(&mut buf_dec));
+        EncValue::decrypt_stream(reader, writer).await.unwrap();
+        assert_eq!(data, buf_dec);
+    }
+
+    #[tokio::test]
+    async fn test_empty_file_stream_roundtrip() {
+        // F-23 regression: an empty source file must not panic the FileReader either
+        let _ = EncKeys::generate().unwrap().init();
+        let chunk_size = ChunkSizeKb::try_from(1).unwrap();
+
+        let src = "test_files/test_empty_file_stream.src";
+        std::fs::write(src, b"").unwrap();
+        let target = "test_files/test_empty_file_stream.enc";
+
+        // encrypt (FileReader on an empty file)
+        let reader = StreamReader::File(FileReader {
+            path: src,
+            print_progress: false,
+        });
+        let writer = StreamWriter::File(FileWriter {
+            path: target,
+            overwrite_target: true,
+        });
+        EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size)
+            .await
+            .unwrap();
+
+        // decrypt back to empty
+        let reader = StreamReader::File(FileReader {
+            path: target,
+            print_progress: false,
+        });
+        let mut buf_dec = Vec::new();
+        let writer = StreamWriter::Memory(MemoryWriter(&mut buf_dec));
+        EncValue::decrypt_stream(reader, writer).await.unwrap();
+        assert!(buf_dec.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_truncated_header_nonce_decrypt_errors() {
+        // F-24 regression: a stream truncated to header + nonce (payload_len == 0) must
+        // fail with an error, not decrypt "successfully" to an empty plaintext
+        let _ = EncKeys::generate().unwrap().init();
+        let chunk_size = ChunkSizeKb::try_from(1).unwrap();
+        let data = secure_random_vec(1234).unwrap();
+
+        // encrypt
+        let reader = StreamReader::Memory(MemoryReader(data.clone()));
+        let mut buf_enc = Vec::with_capacity(data.len());
+        let writer = StreamWriter::Memory(MemoryWriter(&mut buf_enc));
+        EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size)
+            .await
+            .unwrap();
+
+        // truncate to header + nonce (payload_len == 0)
+        let (_, _, payload_offset) =
+            EncValueHeader::try_extract_with_nonce(buf_enc.as_slice()).unwrap();
+        let truncated: Vec<u8> = buf_enc[..payload_offset as usize].to_vec();
+
+        // memory reader must error, not produce an empty plaintext
+        let reader = StreamReader::Memory(MemoryReader(truncated.clone()));
+        let mut buf_dec = Vec::new();
+        let writer = StreamWriter::Memory(MemoryWriter(&mut buf_dec));
+        assert!(EncValue::decrypt_stream(reader, writer).await.is_err());
+
+        // file reader must error as well
+        let target = "test_files/test_truncated_header_nonce.enc";
+        std::fs::write(target, &truncated).unwrap();
+        let reader = StreamReader::File(FileReader {
+            path: target,
+            print_progress: false,
+        });
+        let mut buf_dec = Vec::new();
+        let writer = StreamWriter::Memory(MemoryWriter(&mut buf_dec));
+        assert!(EncValue::decrypt_stream(reader, writer).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_file_stream_multi_chunk_small_chunk_size() {
+        // F-25 regression: multi-chunk file round-trip with a small chunk size must keep
+        // AEAD boundaries aligned (the reader now reads each chunk fully, not just once)
+        let _ = EncKeys::generate().unwrap().init();
+        let chunk_size = ChunkSizeKb::try_from(1).unwrap();
+        let data = secure_random_vec(3750).unwrap();
+
+        let src = "test_files/test_file_stream_multi_chunk.src";
+        std::fs::write(src, &data).unwrap();
+        let target = "test_files/test_file_stream_multi_chunk.enc";
+
+        // encrypt (FileReader, multiple full chunks + partial tail)
+        let reader = StreamReader::File(FileReader {
+            path: src,
+            print_progress: false,
+        });
+        let writer = StreamWriter::File(FileWriter {
+            path: target,
+            overwrite_target: true,
+        });
+        EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size)
+            .await
+            .unwrap();
+
+        // decrypt back and compare
+        let reader = StreamReader::File(FileReader {
+            path: target,
+            print_progress: false,
+        });
+        let mut buf_dec = Vec::new();
+        let writer = StreamWriter::Memory(MemoryWriter(&mut buf_dec));
+        EncValue::decrypt_stream(reader, writer).await.unwrap();
+        assert_eq!(data, buf_dec);
+    }
+
+    #[tokio::test]
+    async fn test_channel_reader_contract_edges() {
+        // F-28 regression: ChannelReader contract edges must fail loudly or behave per
+        // the documented done-signals, not shift AEAD boundaries silently
+        let _ = EncKeys::generate().unwrap().init();
+        let chunk_size = ChunkSizeKb::try_from(1024).unwrap();
+
+        // a chunk larger than the first one must be rejected
+        {
+            let (rdr, mut tx) = ChannelReader::new();
+            let reader = StreamReader::Channel(rdr);
+            let mut buf = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf));
+
+            let c1 = secure_random_vec(16).unwrap();
+            let c2 = secure_random_vec(32).unwrap();
+            tokio::task::spawn(async move {
+                tx.send(Ok(c1)).await.unwrap();
+                tx.send(Ok(c2)).await.unwrap();
+            });
+
+            assert!(
+                EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size.clone())
+                    .await
+                    .is_err()
+            );
+        }
+
+        // an empty first chunk is the documented done-signal: exactly one final empty
+        // block, which round-trips to an empty plaintext
+        {
+            let (rdr, mut tx) = ChannelReader::new();
+            let reader = StreamReader::Channel(rdr);
+            let mut buf = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf));
+
+            tokio::task::spawn(async move { tx.send(Ok(Vec::new())).await.unwrap() });
+
+            EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size.clone())
+                .await
+                .unwrap();
+
+            let reader = StreamReader::Memory(MemoryReader(buf.clone()));
+            let mut buf_dec = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf_dec));
+            EncValue::decrypt_stream(reader, writer).await.unwrap();
+            assert!(buf_dec.is_empty());
+        }
+
+        // an error on the first fetch must be preserved, not swallowed into a generic
+        // "Received no data" message
+        {
+            let (rdr, mut tx) = ChannelReader::new();
+            let reader = StreamReader::Channel(rdr);
+            let mut buf = Vec::new();
+            let writer = StreamWriter::Memory(MemoryWriter(&mut buf));
+
+            tokio::task::spawn(async move {
+                tx.send(Err(CryptrError::Encryption("first-fetch error")))
+                    .await
+                    .unwrap();
+            });
+
+            let err = EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size)
+                .await
+                .err()
+                .expect("expected an error");
+            assert!(format!("{err}").contains("first-fetch error"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_channel_writer_forwards_upstream_error() {
+        // F-22 regression: ChannelWriter must forward upstream errors both as its own return
+        // value and to the inner ChannelReceiver, not end the stream cleanly
+        let _ = EncKeys::generate().unwrap().init();
+        let chunk_size = ChunkSizeKb::try_from(1024).unwrap();
+
+        let (rdr, mut tx) = ChannelReader::new();
+        let reader = StreamReader::Channel(rdr);
+        let (writer, mut rx) = ChannelWriter::new();
+        let writer = StreamWriter::Channel(writer);
+
+        // the first chunk must be full-size so it is not treated as the done-signal and the
+        // error on the next fetch is actually reached
+        tokio::task::spawn(async move {
+            tx.send(Ok(secure_random_vec(1024 * 1024).unwrap()))
+                .await
+                .unwrap();
+            tx.send(Err(CryptrError::Encryption("upstream mid-stream failure")))
+                .await
+                .unwrap();
+        });
+
+        let err = EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size)
+            .await
+            .err()
+            .expect("expected an error");
+        assert!(format!("{err}").contains("upstream mid-stream failure"));
+
+        // the inner channel consumer must see the error before end-of-stream
+        let mut saw_error = false;
+        while let Some(item) = rx.next().await {
+            if item.is_err() {
+                saw_error = true;
+                break;
+            }
+        }
+        assert!(saw_error);
+    }
+
+    #[tokio::test]
+    async fn test_file_writer_concurrent_overwrite() {
+        // F-29 regression: concurrent overwrite runs must each atomically replace the target,
+        // so the final file is exactly one input - never a mix of two - and no temp files remain
+        let _ = EncKeys::generate().unwrap().init();
+
+        let path = "test_files/f29_concurrent_target";
+        let n = 8;
+        let mut inputs = Vec::new();
+        let mut handles = Vec::new();
+        for _ in 0..n {
+            let path = path.to_string();
+            let data = secure_random_vec(64 * 1024).unwrap();
+            inputs.push(data.clone());
+            handles.push(tokio::task::spawn(async move {
+                let reader = StreamReader::Memory(MemoryReader(data));
+                let writer = StreamWriter::File(FileWriter {
+                    path: &path,
+                    overwrite_target: true,
+                });
+                EncValue::encrypt_stream_with_chunk_size(
+                    reader,
+                    writer,
+                    ChunkSizeKb::try_from(1024).unwrap(),
+                )
+                .await
+                .unwrap();
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        let enc = fs::read(path).await.unwrap();
+        let reader = StreamReader::Memory(MemoryReader(enc));
+        let mut buf_dec = Vec::new();
+        let writer = StreamWriter::Memory(MemoryWriter(&mut buf_dec));
+        EncValue::decrypt_stream(reader, writer).await.unwrap();
+
+        assert!(
+            inputs
+                .iter()
+                .any(|input| input.as_slice() == buf_dec.as_slice())
+        );
+
+        // no leftover temp files
+        let leftovers: Vec<_> = std::fs::read_dir("test_files")
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("f29_concurrent_target.cryptr-tmp-"))
+            .collect();
+        assert!(leftovers.is_empty());
+
+        let _ = fs::remove_file(path).await;
     }
 
     #[rstest]
@@ -1181,6 +1539,22 @@ mod tests {
         assert_eq!(orig.as_bytes(), dec.as_ref());
     }
 
+    #[test]
+    fn test_decrypt_bytes_truncated_payload_returns_err() {
+        // F-04 regression: a payload shorter than the 12-byte nonce must return
+        // an error, not panic in Bytes::split_to (decrypt_chacha_v1)
+        let password = "123SuperSafe";
+        let value = EncValue::encrypt_with_password(b"hello", password).unwrap();
+        let header_len = 6 + value.header.enc_key_id.len();
+        let full = value.into_bytes().to_vec();
+        // truncate payload to 10 bytes (< 12-byte nonce) -> must be Err, not panic
+        let mut truncated = full.clone();
+        truncated.truncate(header_len + 10);
+        let mut buf = Bytes::from(truncated);
+        let res = EncValue::decrypt_bytes_with_password(&mut buf, password);
+        assert!(res.is_err());
+    }
+
     #[tokio::test]
     async fn test_with_password() {
         let password = "123SuperSafe";
@@ -1191,5 +1565,48 @@ mod tests {
 
         let dec = value.decrypt_with_password(password).unwrap();
         assert_eq!(orig.as_bytes(), dec.as_ref());
+    }
+
+    #[test]
+    fn test_encrypt_key_id_length_bounds() {
+        // F-17/F-21 regression: the header length field is u16 (6 fixed bytes + ID) and
+        // decryption rejects headers with length < 8, so out-of-bounds IDs must be
+        // rejected at construction instead of truncating or producing undecryptable values
+        let too_long = "a".repeat(65_530);
+        assert!(EncValue::encrypt_with_key_id(b"hello", too_long).is_err());
+        assert!(EncValue::encrypt_with_key_id(b"hello", "a".to_string()).is_err());
+    }
+
+    #[test]
+    fn test_try_extract_rejects_invalid_utf8_key_id() {
+        // F-18 regression: invalid UTF-8 in the key ID must error, not become U+FFFD
+        let mut buf = Vec::new();
+        buf.push(1u8); // EncVersion::V1
+        buf.push(1u8); // EncAlg::ChaCha20Poly1305
+        buf.extend_from_slice(&9u16.to_be().to_le_bytes()); // 6 fixed bytes + 3 ID bytes
+        buf.extend_from_slice(&0u16.to_be().to_le_bytes()); // chunk_size 0 (in-memory)
+        buf.extend_from_slice(&[0xFFu8, 0xFE, b'a']);
+
+        let mut raw = Bytes::from(buf);
+        let err = EncValueHeader::try_extract(&mut raw).unwrap_err();
+        assert!(matches!(err, CryptrError::HeaderInvalid(_)));
+    }
+
+    #[test]
+    fn test_decrypt_with_password_uses_header_kdf_params() {
+        // F-20 regression: in-memory password decryption must derive the key with the
+        // KDF params encoded in the header key ID, not always the defaults
+        let password = "123SuperSafe";
+        let params = argon2::Params::new(16_384, 3, 2, Some(32)).unwrap();
+        let kdf = KdfValue::new_with_params(password, params);
+        let key_id = kdf.enc_key_value();
+        let key = kdf.value();
+
+        let header = EncValueHeader::from_enc_key_id(key_id, None).unwrap();
+        let payload = encryption::encrypt(&header.version, &header.alg, b"secret", &key).unwrap();
+        let enc = EncValue { header, payload };
+
+        let dec = enc.decrypt_with_password(password).unwrap();
+        assert_eq!(b"secret".as_slice(), dec.as_ref());
     }
 }

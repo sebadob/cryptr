@@ -33,7 +33,7 @@ pub mod utils;
 /// Encryption Value
 pub mod value;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum CryptrError {
     #[error("CryptrError::Cli({0})")]
     Cli(String),

@@ -139,6 +139,11 @@ fn decrypt_chacha_v1(ciphertext: &mut Bytes, key: &[u8]) -> Result<Bytes, Cryptr
         .map_err(|_| CryptrError::Decryption("Cannot create decryption key from bytes"))?;
     let cipher = ChaCha20Poly1305::new(&k);
     // 96 bits nonce is always the first bytes
+    if ciphertext.len() < NONCE_SIZE_CHACHA.into() {
+        return Err(CryptrError::HeaderInvalid(
+            "Could not extract nonce - too short",
+        ));
+    }
     let nonce = ciphertext.split_to(NONCE_SIZE_CHACHA.into());
     let plaintext = cipher.decrypt(
         nonce.as_ref().try_into().map_err(|err| {
@@ -184,44 +189,69 @@ fn encrypt_chacha_stream_v1(
 
     tokio::spawn(async move {
         // before doing anything else, send the header data unencrypted
-        tx_cipher
+        if let Err(err) = tx_cipher
             .send_async(Ok((
                 LastStreamElement::No,
                 StreamChunk::new(first_data.to_vec()),
             )))
             .await
-            .unwrap();
+        {
+            error!("Error sending header over channel: {}", err);
+            let _ = tx_cipher
+                .send_async(Err(CryptrError::Encryption("Error sending header over channel")))
+                .await;
+            return;
+        }
 
         let mut payload_last = StreamChunk::new(Vec::default());
-        while let Ok(Ok((is_last, mut payload))) = rx.recv_async().await {
-            if is_last == LastStreamElement::Yes {
-                debug!("Received last element in encrypt_chacha_stream_v1");
-                std::mem::swap(&mut payload_last, &mut payload);
-                break;
-            };
+        loop {
+            match rx.recv_async().await {
+                Ok(Ok((is_last, mut payload))) => {
+                    if is_last == LastStreamElement::Yes {
+                        debug!("Received last element in encrypt_chacha_stream_v1");
+                        std::mem::swap(&mut payload_last, &mut payload);
+                        break;
+                    };
 
-            match encryptor.encrypt_next(payload.as_ref()) {
-                Ok(ciperthext) => {
-                    if let Err(err) = tx_cipher
-                        .send_async(Ok((LastStreamElement::No, StreamChunk::new(ciperthext))))
-                        .await
-                    {
-                        let msg = "Error sending next cipertext over channel";
-                        error!("{}: {}", msg, err);
-                        tx_cipher
-                            .send_async(Err(CryptrError::Encryption(msg)))
-                            .await
-                            .unwrap();
-                        return;
+                    match encryptor.encrypt_next(payload.as_ref()) {
+                        Ok(ciperthext) => {
+                            if let Err(err) = tx_cipher
+                                .send_async(Ok((
+                                    LastStreamElement::No,
+                                    StreamChunk::new(ciperthext),
+                                )))
+                                .await
+                            {
+                                let msg = "Error sending next cipertext over channel";
+                                error!("{}: {}", msg, err);
+                                let _ = tx_cipher
+                                    .send_async(Err(CryptrError::Encryption(msg)))
+                                    .await;
+                                return;
+                            }
+                        }
+                        Err(err) => {
+                            let msg = "Error encrypting next stream value";
+                            error!("{}: {}", msg, err);
+                            let _ = tx_cipher
+                                .send_async(Err(CryptrError::Encryption(msg)))
+                                .await;
+                            return;
+                        }
                     }
                 }
-                Err(err) => {
-                    let msg = "Error encrypting next stream value";
-                    error!("{}: {}", msg, err);
-                    tx_cipher
+                Ok(Err(e)) => {
+                    let msg = format!("Upstream stream error: {}", e.as_str());
+                    error!("{}", msg);
+                    let _ = tx_cipher.send_async(Err(e)).await;
+                    return;
+                }
+                Err(_recv_err) => {
+                    let msg = "Stream channel closed before the last stream element was received";
+                    error!("{}", msg);
+                    let _ = tx_cipher
                         .send_async(Err(CryptrError::Encryption(msg)))
-                        .await
-                        .unwrap();
+                        .await;
                     return;
                 }
             }
@@ -235,20 +265,18 @@ fn encrypt_chacha_stream_v1(
                 {
                     let msg = "Error sending last cipertext over channel";
                     error!("{}: {}", msg, err);
-                    tx_cipher
+                    let _ = tx_cipher
                         .send_async(Err(CryptrError::Encryption(msg)))
-                        .await
-                        .unwrap();
+                        .await;
                     return;
                 }
             }
             Err(err) => {
                 let msg = "Error encrypting last stream value";
                 error!("{}: {}", msg, err);
-                tx_cipher
+                let _ = tx_cipher
                     .send_async(Err(CryptrError::Encryption(msg)))
-                    .await
-                    .unwrap();
+                    .await;
                 return;
             }
         }
@@ -279,36 +307,57 @@ fn decrypt_chacha_channel_stream_v1(
 
     tokio::spawn(async move {
         let mut payload_last = StreamChunk::new(Vec::default());
-        while let Ok(Ok((is_last, mut payload))) = rx.recv_async().await {
-            if is_last == LastStreamElement::Yes {
-                debug!("Received last element in decrypt_chacha_stream_v1");
-                std::mem::swap(&mut payload_last, &mut payload);
-                break;
-            };
+        loop {
+            match rx.recv_async().await {
+                Ok(Ok((is_last, mut payload))) => {
+                    if is_last == LastStreamElement::Yes {
+                        debug!("Received last element in decrypt_chacha_stream_v1");
+                        std::mem::swap(&mut payload_last, &mut payload);
+                        break;
+                    };
 
-            match decryptor.decrypt_next(payload.as_ref()) {
-                Ok(plaintext) => {
-                    if let Err(err) = tx_plain
-                        .send_async(Ok((LastStreamElement::No, StreamChunk::new(plaintext))))
-                        .await
-                    {
-                        let msg = "Error sending next plaintext over channel";
-                        error!("{}: {}", msg, err);
-                        tx_plain
-                            .send_async(Err(CryptrError::Decryption(msg)))
-                            .await
-                            .unwrap();
-                        return;
+                    match decryptor.decrypt_next(payload.as_ref()) {
+                        Ok(plaintext) => {
+                            if let Err(err) = tx_plain
+                                .send_async(Ok((
+                                    LastStreamElement::No,
+                                    StreamChunk::new(plaintext),
+                                )))
+                                .await
+                            {
+                                let msg = "Error sending next plaintext over channel";
+                                error!("{}: {}", msg, err);
+                                let _ = tx_plain
+                                    .send_async(Err(CryptrError::Decryption(msg)))
+                                    .await;
+                                return;
+                            }
+                        }
+                        Err(err) => {
+                            let msg = "Error decrypting next stream value";
+                            error!("{}: {}", msg, err);
+                            error!("payload length: {}", payload.as_ref().len());
+                            let _ = tx_plain
+                                .send_async(Err(CryptrError::Decryption(msg)))
+                                .await;
+                            return;
+                        }
                     }
                 }
-                Err(err) => {
-                    let msg = "Error decrypting next stream value";
-                    error!("{}: {}", msg, err);
-                    error!("payload length: {}", payload.as_ref().len());
-                    tx_plain
+                Ok(Err(e)) => {
+                    let msg = format!("Upstream stream error: {}", e.as_str());
+                    error!("{}", msg);
+                    let _ = tx_plain.send_async(Err(e)).await;
+                    return;
+                }
+                Err(_recv_err) => {
+                    let msg = "Stream channel closed before the last stream element was received";
+                    error!("{}", msg);
+                    // best-effort: if the receiver is already gone there is no one left
+                    // to inform about this error
+                    let _ = tx_plain
                         .send_async(Err(CryptrError::Decryption(msg)))
-                        .await
-                        .unwrap();
+                        .await;
                     return;
                 }
             }
@@ -322,20 +371,22 @@ fn decrypt_chacha_channel_stream_v1(
                 {
                     let msg = "Error sending last plaintext over channel";
                     error!("{}: {}", msg, err);
-                    tx_plain
+                    // best-effort: if the receiver is already gone there is no one left
+                    // to inform about this error
+                    let _ = tx_plain
                         .send_async(Err(CryptrError::Decryption(msg)))
-                        .await
-                        .unwrap();
+                        .await;
                     return;
                 }
             }
             Err(err) => {
                 let msg = "Error decrypting last stream value";
                 error!("{}: {}", msg, err);
-                tx_plain
+                // best-effort: if the receiver is already gone there is no one left
+                // to inform about this error
+                let _ = tx_plain
                     .send_async(Err(CryptrError::Decryption(msg)))
-                    .await
-                    .unwrap();
+                    .await;
                 return;
             }
         }
@@ -362,5 +413,58 @@ mod tests {
 
         let plain_dec = String::from_utf8(dec.to_vec()).unwrap();
         assert_eq!(plain, plain_dec.as_str());
+    }
+
+    #[cfg(feature = "streaming")]
+    #[tokio::test]
+    async fn test_encrypt_stream_forwards_upstream_error() {
+        let key = secure_random_vec(32).unwrap();
+        let k: ChaChaKey = key.as_slice().try_into().unwrap();
+        let nonce = [0u8; 7];
+
+        let (tx, rx) = flume::bounded::<Result<(LastStreamElement, StreamChunk), CryptrError>>(4);
+        tx.send_async(Ok((
+            LastStreamElement::No,
+            StreamChunk::new(b"secret".to_vec()),
+        )))
+        .await
+        .unwrap();
+        tx.send_async(Err(CryptrError::Encryption("upstream boom")))
+            .await
+            .unwrap();
+        drop(tx);
+
+        let rx_out = encrypt_chacha_stream_v1(rx, k, &nonce, Bytes::from(vec![0u8; 4])).unwrap();
+
+        // header passes through unencrypted
+        let (is_last, chunk) = rx_out.recv_async().await.unwrap().unwrap();
+        assert_eq!(is_last, LastStreamElement::No);
+        assert_eq!(chunk.as_ref(), &[0u8; 4]);
+        // ciphertext of the data chunk
+        let (_, cipher) = rx_out.recv_async().await.unwrap().unwrap();
+        assert_ne!(cipher.as_ref(), b"secret");
+        // upstream error must be forwarded, not swallowed into a clean last element
+        let err = rx_out.recv_async().await.unwrap().unwrap_err();
+        assert_eq!(err.as_str(), "upstream boom");
+    }
+
+    #[cfg(feature = "streaming")]
+    #[tokio::test]
+    async fn test_decrypt_stream_forwards_upstream_error() {
+        let key = secure_random_vec(32).unwrap();
+        let k: ChaChaKey = key.as_slice().try_into().unwrap();
+        let nonce = [0u8; 7];
+
+        let (tx, rx) = flume::bounded::<Result<(LastStreamElement, StreamChunk), CryptrError>>(4);
+        tx.send_async(Err(CryptrError::Decryption("upstream boom")))
+            .await
+            .unwrap();
+        drop(tx);
+
+        let rx_out = decrypt_chacha_channel_stream_v1(rx, k, &nonce).unwrap();
+
+        // upstream error must be forwarded, not swallowed into a clean last element
+        let err = rx_out.recv_async().await.unwrap().unwrap_err();
+        assert_eq!(err.as_str(), "upstream boom");
     }
 }
