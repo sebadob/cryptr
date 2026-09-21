@@ -1,35 +1,53 @@
 use cryptr::CryptrError;
 use std::fmt::Write;
-use tokio::io::{AsyncBufReadExt, BufReader, stdin};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader, stdin};
 
-/// Reads a line from stdin
+/// Reads a single line from stdin (short, single-line inputs such as pasted key blobs or menu selections).
 pub(crate) async fn read_line_stdin() -> Result<String, CryptrError> {
-    let (tx, rx) = flume::unbounded::<Option<String>>();
+    let (tx, rx) = flume::unbounded::<Result<Option<String>, CryptrError>>();
 
     tokio::spawn(async move {
         let stdin = BufReader::new(stdin());
 
         let res = match stdin.lines().next_line().await {
-            Ok(Some(line)) => Some(line),
-            Ok(None) => None,
-            Err(_) => None,
+            Ok(line) => Ok(line), // None = clean EOF
+            Err(err) => Err(CryptrError::Cli(format!(
+                "Error reading line from stdin: {err}"
+            ))),
         };
         tx.send_async(res).await.unwrap();
     });
 
-    let mut res = String::with_capacity(32);
-    while let Ok(data) = rx.recv_async().await {
-        match data {
-            None => {
-                return Err(CryptrError::Cli(
-                    "Error reading line from stdin".to_string(),
-                ));
-            }
-            Some(data) => write!(res, "{data}")?,
-        }
+    let inner = rx
+        .recv_async()
+        .await
+        .map_err(|_| CryptrError::Cli("stdin reader task terminated unexpectedly".to_string()))?;
+    match inner? {
+        None => Err(CryptrError::Cli(
+            "Unexpected end of stdin (EOF) while reading a line".to_string(),
+        )),
+        Some(line) => Ok(line),
     }
+}
 
-    Ok(res)
+/// Reads all of stdin until EOF, returning the raw bytes.
+pub(crate) async fn read_stdin_all() -> Result<Vec<u8>, CryptrError> {
+    let (tx, rx) = flume::unbounded::<Result<Vec<u8>, CryptrError>>();
+
+    tokio::spawn(async move {
+        let mut stdin = stdin();
+        let mut buf = Vec::new();
+        let res = stdin
+            .read_to_end(&mut buf)
+            .await
+            .map(|_| buf)
+            .map_err(|err| CryptrError::Cli(format!("Error reading from stdin: {err}")));
+        tx.send_async(res).await.unwrap();
+    });
+
+    rx.recv_async()
+        .await
+        .map_err(|_| CryptrError::Cli("stdin reader task terminated unexpectedly".to_string()))?
 }
 
 #[derive(Debug)]

@@ -1,8 +1,8 @@
+use crate::CryptrError;
 use crate::encryption::ChunkSizeKb;
 use crate::stream::EncStreamReader;
 use crate::stream::{LastStreamElement, StreamChunk};
 use crate::value::EncValueHeader;
-use crate::CryptrError;
 use async_trait::async_trait;
 use flume::Sender;
 use futures::channel::oneshot;
@@ -40,10 +40,17 @@ impl EncStreamReader for MemoryReader {
             chunk_size = value_len;
         };
 
-        let mut chunks_total = value_len / chunk_size;
-        if !value_len.is_multiple_of(chunk_size) {
-            chunks_total += 1;
-        }
+        // An empty input produces exactly one empty last chunk (and avoids a divide-by-zero)
+        let chunks_total = match value_len.checked_div(chunk_size) {
+            Some(quotient) => {
+                let mut total = quotient;
+                if !value_len.is_multiple_of(chunk_size) {
+                    total += 1;
+                }
+                total
+            }
+            None => 1,
+        };
 
         debug!("chunks_total: {} chunk size: {}", chunks_total, chunk_size,);
 
@@ -87,12 +94,22 @@ impl EncStreamReader for MemoryReader {
         // we need to get the correct chunk size for the decryption before sending the header
         let chunk_size = header.chunk_size.value_bytes_with_mac(&header.alg) as usize;
 
-        // initialize the streaming manager
-        tx_init.send((header, nonce)).unwrap();
+        // initialize the streaming manager (best-effort: if the receiver is already gone,
+        // the chunk channel below will fail and the reader task exits with an error)
+        let _ = tx_init.send((header, nonce));
 
         // start sending the payload itself
         let payload_offset = payload_offset as usize;
         let value_len = self.0.len();
+
+        // a valid encrypted payload is at least one AEAD block long (tag only, for empty
+        // plaintext), so a zero-length payload means the input was truncated after the nonce
+        if value_len == payload_offset {
+            return Err(CryptrError::Decryption(
+                "Encrypted payload is empty - the input seems to be truncated right after \
+                 the encryption nonce",
+            ));
+        }
 
         let handle: JoinHandle<Result<(), CryptrError>> = tokio::spawn(async move {
             let mut total = 0;

@@ -49,7 +49,6 @@ impl KdfValue {
         format!("password${}${}${}", self.m_cost, self.t_cost, self.p_cost)
     }
 
-    #[cfg(feature = "streaming")]
     pub fn try_enc_key_to_params(enc_key_id: &str) -> Option<Params> {
         let (_, values) = enc_key_id.split_once("password$")?;
         let mut split = values.split('$');
@@ -57,6 +56,14 @@ impl KdfValue {
         let m_cost = split.next()?.parse::<u32>().ok()?;
         let t_cost = split.next()?.parse::<u32>().ok()?;
         let p_cost = split.next()?.parse::<u32>().ok()?;
+
+        // We must check the upper bounds here. If we assume the host is malicious, the Enc Key
+        // params are basically attacker controlled. This means without a bound check, a payload
+        // for a resource exhaustion attack could be crafted. We must not build the params in that
+        // case because it would be trivial to get OOM killed.
+        if m_cost > M_COST || t_cost > T_COST || p_cost > P_COST {
+            return None;
+        }
 
         let params = Params::new(m_cost, t_cost, p_cost, Some(OUTPUT_LEN)).ok()?;
         Some(params)
@@ -83,5 +90,17 @@ mod tests {
 
         assert_eq!(kdf.value, kdf_parsed.value);
         assert_eq!(key_id, kdf_parsed.enc_key_value());
+    }
+
+    #[cfg(feature = "streaming")]
+    #[test]
+    fn test_kdf_enc_key_params_bounded() {
+        // boundary: exactly at the generation constants must pass
+        assert!(KdfValue::try_enc_key_to_params("password$32768$4$4").is_some());
+        // anything above the constants is rejected (F-02 DoS payloads)
+        assert!(KdfValue::try_enc_key_to_params("password$32769$4$4").is_none());
+        assert!(KdfValue::try_enc_key_to_params("password$32768$5$4").is_none());
+        assert!(KdfValue::try_enc_key_to_params("password$32768$4$5").is_none());
+        assert!(KdfValue::try_enc_key_to_params("password$4294967295$4294967295$255").is_none());
     }
 }

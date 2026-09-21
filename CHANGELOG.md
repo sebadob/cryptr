@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.12.0
+
+This version brings lots of tiny fixes and improvements for stability and security. There was nothing major, just
+robustness improvements in general and some preventions against a possibly hostile S3 host.
+
+MSRV was bumped to v1.90.
+
 ## v0.11.0
 
 - Rust edition bumped internally to 2024.

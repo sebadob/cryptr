@@ -1,6 +1,6 @@
+use crate::CryptrError;
 use crate::stream::{EncStreamWriter, LastStreamElement, StreamChunk};
 use crate::value::CHANNELS;
-use crate::CryptrError;
 use async_trait::async_trait;
 use flume::Receiver;
 use futures::SinkExt;
@@ -42,18 +42,33 @@ impl EncStreamWriter for ChannelWriter {
     ) -> Result<(), CryptrError> {
         let mut total = 0;
 
-        while let Ok(Ok((is_last, data))) = rx.recv_async().await {
-            let payload = data.0;
-            total += payload.len();
+        loop {
+            match rx.recv_async().await {
+                Ok(Ok((is_last, data))) => {
+                    let payload = data.0;
+                    total += payload.len();
 
-            self.0
-                .send(Ok(payload))
-                .await
-                .map_err(|err| CryptrError::Generic(err.to_string()))?;
+                    self.0
+                        .send(Ok(payload))
+                        .await
+                        .map_err(|err| CryptrError::Generic(err.to_string()))?;
 
-            if is_last == LastStreamElement::Yes {
-                debug!("Last payload received. Total bytes received: {total}");
-                break;
+                    if is_last == LastStreamElement::Yes {
+                        debug!("Last payload received. Total bytes received: {total}");
+                        break;
+                    }
+                }
+                // forward the upstream error to the inner channel as well, so the consumer of
+                // the ChannelReceiver sees it too
+                Ok(Err(err)) => {
+                    let _ = self.0.send(Err(err.clone())).await;
+                    return Err(err);
+                }
+                Err(_) => {
+                    return Err(CryptrError::Generic(
+                        "Decryption task closed the channel".to_string(),
+                    ));
+                }
             }
         }
 

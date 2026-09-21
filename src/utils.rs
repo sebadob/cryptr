@@ -1,5 +1,5 @@
 use crate::CryptrError;
-use base64::{engine, engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine, engine::general_purpose};
 use rand::{RngExt, TryRng};
 
 const B64_STD: engine::GeneralPurpose = general_purpose::STANDARD;

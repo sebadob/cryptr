@@ -1,8 +1,8 @@
+use crate::CryptrError;
 use crate::encryption::ChunkSizeKb;
 use crate::stream::EncStreamReader;
 use crate::stream::{LastStreamElement, StreamChunk};
 use crate::value::EncValueHeader;
-use crate::CryptrError;
 use async_trait::async_trait;
 use flume::Sender;
 use futures::channel::oneshot;
@@ -59,10 +59,17 @@ impl EncStreamReader for FileReader<'_> {
             chunk_size = filesize;
         }
 
-        let mut chunks_total = filesize / chunk_size;
-        if filesize % chunk_size > 0 {
-            chunks_total += 1;
-        }
+        // An empty input produces exactly one empty last chunk (and avoids a divide-by-zero)
+        let chunks_total = match filesize.checked_div(chunk_size) {
+            Some(quotient) => {
+                let mut total = quotient;
+                if filesize % chunk_size > 0 {
+                    total += 1;
+                }
+                total
+            }
+            None => 1,
+        };
 
         let tx_progress = Self::spawn_progress(self.print_progress, self.path, filesize).await;
 
@@ -74,7 +81,16 @@ impl EncStreamReader for FileReader<'_> {
             let mut counter = 0;
 
             while counter < chunks_total {
-                let length = f.read(&mut buf).await?;
+                // read up to chunk_size bytes, but keep reading until the buffer is full
+                // or the file is exhausted - a short read would shift AEAD boundaries
+                let mut length = 0usize;
+                while (length as u64) < chunk_size {
+                    let n = f.read(&mut buf[length..]).await?;
+                    if n == 0 {
+                        break; // EOF
+                    }
+                    length += n;
+                }
 
                 let is_last = if counter < (chunks_total - 1) {
                     LastStreamElement::No
@@ -114,8 +130,9 @@ impl EncStreamReader for FileReader<'_> {
         let chunk_size = header.chunk_size.value_bytes_with_mac(&header.alg) as u64;
         let payload_offset = payload_offset as u64;
 
-        // initialize the streaming manager
-        tx_init.send((header, nonce)).unwrap();
+        // initialize the streaming manager (best-effort: if the receiver is already gone,
+        // the chunk channel below will fail and the reader task exits with an error)
+        let _ = tx_init.send((header, nonce));
 
         let meta = file.metadata().await.expect("Reading file metadata");
         #[cfg(not(target_os = "windows"))]
@@ -123,6 +140,15 @@ impl EncStreamReader for FileReader<'_> {
         #[cfg(target_os = "windows")]
         let filesize = meta.len();
         let payload_len = filesize - payload_offset;
+
+        // a valid encrypted payload is at least one AEAD block long (tag only, for empty
+        // plaintext), so a zero-length payload means the file was truncated after the nonce
+        if payload_len == 0 {
+            return Err(CryptrError::Decryption(
+                "Encrypted payload is empty - the file seems to be truncated right after \
+                 the encryption nonce",
+            ));
+        }
 
         file.seek(SeekFrom::Start(payload_offset)).await?;
 
@@ -141,7 +167,16 @@ impl EncStreamReader for FileReader<'_> {
             let mut counter = 0;
 
             while counter < chunks_total {
-                let length = file.read(&mut buf).await?;
+                // read up to chunk_size bytes, but keep reading until the buffer is full
+                // or the file is exhausted - a short read would shift AEAD boundaries
+                let mut length = 0usize;
+                while (length as u64) < chunk_size {
+                    let n = file.read(&mut buf[length..]).await?;
+                    if n == 0 {
+                        break; // EOF
+                    }
+                    length += n;
+                }
 
                 let is_last = if counter < (chunks_total - 1) {
                     LastStreamElement::No

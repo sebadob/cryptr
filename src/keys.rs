@@ -1,7 +1,7 @@
+use crate::CryptrError;
 use crate::kdf::KdfValue;
 use crate::utils::{b64_decode, b64_encode, secure_random_alnum, secure_random_vec};
 use crate::value::EncValue;
-use crate::CryptrError;
 use regex::Regex;
 use std::collections::HashMap;
 use std::env;
@@ -65,11 +65,23 @@ impl EncKeysSealed {
     }
 
     pub async fn save_to_file(&self, path_full: &str) -> Result<(), CryptrError> {
-        if let Ok(file) = File::open(&path_full).await {
-            let meta = file.metadata().await?;
-            if meta.is_dir() {
-                return Err(CryptrError::File("target file is a directory"));
+        match File::open(&path_full).await {
+            Ok(file) => {
+                let meta = file.metadata().await?;
+                if meta.is_dir() {
+                    return Err(CryptrError::File("target file is a directory"));
+                }
             }
+            Err(_) => {
+                File::create(&path_full).await?;
+            }
+        }
+
+        #[cfg(target_family = "unix")]
+        {
+            use std::fs::Permissions;
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path_full, Permissions::from_mode(0o600)).await?;
         }
 
         fs::write(&path_full, self.0.as_bytes()).await?;
@@ -81,7 +93,7 @@ impl EncKeysSealed {
 ///
 /// These can be either used statically initialized for ease of use, or given dynamically each time.
 /// You just need to use the appropriate functions for the `EncValue`.
-#[derive(Debug, Default, PartialEq, bincode::Encode, bincode::Decode)]
+#[derive(Debug, Default, PartialEq, bincode_next::Encode, bincode_next::Decode)]
 pub struct EncKeys {
     pub enc_key_active: String,
     pub enc_keys: Vec<(String, Vec<u8>)>,
@@ -91,8 +103,8 @@ impl TryFrom<&[u8]> for EncKeys {
     type Error = CryptrError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let (slf, _) =
-            bincode::decode_from_slice(value, bincode::config::legacy()).map_err(|err| {
+        let (slf, _) = bincode_next::decode_from_slice(value, bincode_next::config::legacy())
+            .map_err(|err| {
                 error!("Deserialization error: {:?}", err);
                 CryptrError::Deserialization("Cannot deserialize EncKeys from given bytes")
             })?;
@@ -184,6 +196,27 @@ impl EncKeys {
             .collect();
 
         Ok(())
+    }
+
+    /// Merges incoming keys into self, skipping any whose ID already exists.
+    ///
+    /// The check is performed against the live list as keys are pushed, so duplicates
+    /// within the incoming set itself are also skipped (F-33). Returns the IDs of the
+    /// skipped keys, in order.
+    pub fn merge_in(&mut self, incoming: &[(String, Vec<u8>)]) -> Vec<String> {
+        let mut skipped = Vec::new();
+        for (id, key) in incoming {
+            if self
+                .enc_keys
+                .iter()
+                .any(|(existing_id, _)| existing_id == id)
+            {
+                skipped.push(id.clone());
+                continue;
+            }
+            self.enc_keys.push((id.clone(), key.clone()));
+        }
+        skipped
     }
 
     /// Formats a converted ENC_KEYS string in the correct format for config / K8s secret
@@ -286,7 +319,7 @@ impl EncKeys {
     }
 
     fn into_bytes(self) -> Vec<u8> {
-        bincode::encode_to_vec(&self, bincode::config::legacy()).unwrap()
+        bincode_next::encode_to_vec(&self, bincode_next::config::legacy()).unwrap()
     }
 
     /// All keys merged into a single `String` for usage via ENV vars
@@ -329,11 +362,22 @@ impl EncKeys {
 
         fs::create_dir_all(path).await?;
         let path_full = format!("{path}/{file_name}");
-        if let Ok(file) = File::open(&path_full).await {
-            let meta = file.metadata().await?;
-            if meta.is_dir() {
-                return Err(CryptrError::Keys("target path is a directory"));
+        match File::open(&path_full).await {
+            Ok(file) => {
+                let meta = file.metadata().await?;
+                if meta.is_dir() {
+                    return Err(CryptrError::Keys("target path is a directory"));
+                }
             }
+            Err(_) => {
+                File::create(&path_full).await?;
+            }
+        }
+        #[cfg(target_family = "unix")]
+        {
+            use std::fs::Permissions;
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path_full, Permissions::from_mode(0o600)).await?;
         }
 
         let mut keys = String::with_capacity(self.enc_keys.len() * 56);
@@ -348,12 +392,6 @@ impl EncKeys {
             self.enc_key_active
         );
         fs::write(&path_full, content.as_bytes()).await?;
-        #[cfg(target_family = "unix")]
-        {
-            use std::fs::Permissions;
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&path_full, Permissions::from_mode(0o600)).await?;
-        }
 
         Ok(())
     }
@@ -365,7 +403,7 @@ impl EncKeys {
                 return Ok(key.as_slice());
             }
         }
-        Err(CryptrError::Keys("EncKey ID {} does not exist"))
+        Err(CryptrError::Keys("EncKey ID does not exist"))
     }
 
     /// Returns a reference to the initialized EncKeys.
@@ -405,7 +443,7 @@ impl EncKeys {
                 return Ok(key.as_slice());
             }
         }
-        Err(CryptrError::Keys("Active EncKey ID {} does not exist"))
+        Err(CryptrError::Keys("Active EncKey ID does not exist"))
     }
 
     /// Initialize the encryption keys statically for ease of use.
@@ -566,6 +604,82 @@ mod tests {
         let keys_from = EncKeys::read_from_file(&path_full).unwrap();
         assert_eq!(keys, keys_from);
         assert_eq!(keys.enc_keys.len(), keys_len as usize);
+    }
+
+    #[test]
+    fn test_merge_in_skips_within_set_duplicates() {
+        // F-33 regression: two identical IDs in one imported set must not both be pushed
+        let mut keys = EncKeys::default();
+        let key_bytes = vec![7u8; 32];
+        let incoming = vec![
+            ("dupId".to_string(), key_bytes.clone()),
+            ("dupId".to_string(), key_bytes.clone()),
+            ("otherId".to_string(), key_bytes.clone()),
+        ];
+
+        let skipped = keys.merge_in(&incoming);
+
+        assert_eq!(skipped, vec!["dupId".to_string()]);
+        assert_eq!(keys.enc_keys.len(), 2);
+        assert_eq!(
+            keys.enc_keys.iter().filter(|(id, _)| id == "dupId").count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sealed_save_to_new_path_succeeds() {
+        // F-05 regression: saving a sealed key file to a path that does not
+        // exist yet must succeed, land with 0600 permissions, and round-trip
+        let keys = EncKeys::generate_multiple(2).unwrap();
+        let enc_keys = keys.enc_keys.clone();
+        let active = keys.enc_key_active.clone();
+
+        fs::create_dir_all("./test_files").await.unwrap();
+        let path_full = "./test_files/sealed_keys_new";
+        let _ = fs::remove_file(path_full).await;
+
+        EncKeysSealed::seal(keys, "123SuperSafe")
+            .unwrap()
+            .save_to_file(path_full)
+            .await
+            .unwrap();
+
+        #[cfg(target_family = "unix")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = fs::metadata(path_full).await.unwrap();
+            assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        }
+
+        let unsealed = EncKeysSealed::read_from_file(path_full)
+            .await
+            .unwrap()
+            .unseal("123SuperSafe")
+            .unwrap();
+        assert_eq!(unsealed.enc_key_active, active);
+        assert_eq!(unsealed.enc_keys, enc_keys);
+    }
+
+    #[tokio::test]
+    async fn test_save_to_file_with_path_permissions_0600() {
+        // F-05 regression: plaintext key files must land with 0600 permissions
+        let keys = EncKeys::generate_multiple(2).unwrap();
+
+        fs::create_dir_all("./test_files").await.unwrap();
+        let path_full = "./test_files/keys_perm_check";
+        let _ = fs::remove_file(path_full).await;
+
+        keys.save_to_file_with_path("./test_files", "keys_perm_check")
+            .await
+            .unwrap();
+
+        #[cfg(target_family = "unix")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = fs::metadata(path_full).await.unwrap();
+            assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        }
     }
 
     #[tokio::test]

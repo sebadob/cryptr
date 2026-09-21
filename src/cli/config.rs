@@ -1,5 +1,5 @@
-use cryptr::keys::EncKeys;
 use cryptr::CryptrError;
+use cryptr::keys::EncKeys;
 use s3_simple::{AccessKeyId, AccessKeySecret, Bucket, BucketOptions, Credentials, Region};
 use std::env;
 use std::fmt::{Display, Formatter};
@@ -104,6 +104,31 @@ impl EncConfig {
         Self::read_from_file(&path).await
     }
 
+    /// Reads the config for a mutation workflow.
+    ///
+    /// A missing config file yields an empty default config (first run); an existing
+    /// file that fails to parse is surfaced as an error instead of being silently
+    /// downgraded to an empty config.
+    pub async fn read_or_default() -> Result<Self, CryptrError> {
+        let path = EncKeys::config_path().await?;
+        Self::read_or_default_at(&path).await
+    }
+
+    async fn read_or_default_at(path: &str) -> Result<Self, CryptrError> {
+        match Self::read_from_file(path).await {
+            Ok(config) => Ok(config),
+            Err(err) => {
+                if fs::metadata(path).await.is_ok() {
+                    Err(CryptrError::Generic(format!(
+                        "Could not read the existing config file: {err}"
+                    )))
+                } else {
+                    Ok(Self::default())
+                }
+            }
+        }
+    }
+
     pub async fn read_from_file(path: &str) -> Result<Self, CryptrError> {
         let enc_keys = EncKeys::read_from_file(path)?;
         let s3_config = S3Config::read_from_file(path).await?;
@@ -180,5 +205,43 @@ S3_ACCESS_SECRET={}
             self.s3_config.access_key,
             self.s3_config.access_secret,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_read_or_default_missing_file_yields_empty_config() {
+        // F-32 regression: a missing config file must yield an empty default, not an error
+        let path = "./test_files/f32_missing_config";
+        let _ = fs::remove_file(path).await;
+
+        let config = EncConfig::read_or_default_at(path).await.unwrap();
+        assert!(config.enc_keys.enc_key_active.is_empty());
+        assert!(config.enc_keys.enc_keys.is_empty());
+        assert!(config.s3_config.url.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_read_or_default_corrupt_file_surfaces_error() {
+        // F-32 regression: an existing config file that fails to parse must be
+        // surfaced as an error, not silently downgraded to an empty config
+        let path = "./test_files/f32_corrupt_config";
+        fs::create_dir_all("./test_files").await.unwrap();
+
+        // A line without '=' makes dotenvy fail to parse the file
+        fs::write(
+            path,
+            "ENC_KEY_ACTIVE=corruptKey1\nthis-line-has-no-equals\n",
+        )
+        .await
+        .unwrap();
+
+        let err = EncConfig::read_or_default_at(path).await.unwrap_err();
+        assert!(matches!(err, CryptrError::Generic(_)));
+
+        let _ = fs::remove_file(path).await;
     }
 }

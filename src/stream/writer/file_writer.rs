@@ -1,5 +1,5 @@
-use crate::stream::{EncStreamWriter, LastStreamElement, StreamChunk};
 use crate::CryptrError;
+use crate::stream::{EncStreamWriter, LastStreamElement, StreamChunk};
 use async_trait::async_trait;
 use flume::Receiver;
 use std::fmt::Formatter;
@@ -33,53 +33,69 @@ impl EncStreamWriter for FileWriter<'_> {
         use tokio::io::AsyncWriteExt;
 
         // check if the target exists already
-        let mut should_remove = false;
         if let Ok(f) = File::open(&self.path).await {
             let meta = f.metadata().await?;
             if meta.is_dir() {
                 return Err(CryptrError::File("Target file is a directory"));
             }
 
-            if self.overwrite_target {
-                should_remove = true;
-            } else {
+            if !self.overwrite_target {
                 return Err(CryptrError::File("Target file exists already"));
             }
         }
-        if should_remove {
-            fs::remove_file(&self.path).await?;
-        }
 
-        // open the file again with correct options
+        // write to a uniquely named temp file next to the target, then atomically rename it over
+        // the target. This avoids the check-then-remove-then-open race where concurrent overwrite
+        // runs could delete each other's freshly created file.
+        let rand_suffix = crate::utils::secure_random_alnum(16);
+        let temp_path = format!("{}.cryptr-tmp-{}", self.path, rand_suffix);
+
         let mut opts = OpenOptions::new();
-        opts.append(true);
-        opts.create(true);
-        let mut file = opts.open(&self.path).await?;
+        opts.write(true);
+        opts.create_new(true);
+        #[cfg(target_family = "unix")]
+        {
+            opts.mode(0o600);
+        }
+        let mut file = opts.open(&temp_path).await?;
 
         let mut total = 0;
 
-        loop {
+        // the loop returns Ok(()) once the last element has been written, or Err on an upstream
+        // error, a closed channel, or an IO failure
+        let loop_result: Result<(), CryptrError> = loop {
             match rx.recv_async().await {
                 Ok(Ok((is_last, data))) => {
                     let payload = data.as_ref();
-                    let length = file.write(payload).await?;
-                    total += length;
+                    if let Err(err) = file.write_all(payload).await {
+                        break Err(CryptrError::from(err));
+                    }
+                    total += payload.len();
 
                     if is_last == LastStreamElement::Yes {
                         debug!("Last payload received. Total bytes written: {}", total);
-                        break;
+                        break Ok(());
                     }
                 }
                 Ok(Err(err)) => {
-                    return Err(err);
+                    break Err(err);
                 }
                 Err(_) => {
-                    return Err(CryptrError::Generic(
+                    break Err(CryptrError::Generic(
                         "Decryption task closed the channel".to_string(),
                     ));
                 }
             }
+        };
+
+        if let Err(err) = loop_result {
+            // best-effort cleanup of the incomplete temp file
+            let _ = fs::remove_file(&temp_path).await;
+            return Err(err);
         }
+
+        // atomically replace the target with the completed temp file
+        fs::rename(&temp_path, &self.path).await?;
 
         debug!("Writer exiting: {} bytes written", total);
 

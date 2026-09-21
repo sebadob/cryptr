@@ -1,5 +1,5 @@
-use crate::stream::{EncStreamWriter, LastStreamElement, StreamChunk};
 use crate::CryptrError;
+use crate::stream::{EncStreamWriter, LastStreamElement, StreamChunk};
 use async_trait::async_trait;
 use flume::Receiver;
 use std::fmt::Formatter;
