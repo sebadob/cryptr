@@ -1,8 +1,8 @@
+use crate::CryptrError;
 use crate::encryption::ChunkSizeKb;
 use crate::stream::EncStreamReader;
 use crate::stream::{LastStreamElement, StreamChunk};
 use crate::value::EncValueHeader;
-use crate::CryptrError;
 use async_trait::async_trait;
 use flume::Sender;
 use futures::channel::oneshot;

@@ -18,9 +18,10 @@ pub(crate) async fn read_line_stdin() -> Result<String, CryptrError> {
         tx.send_async(res).await.unwrap();
     });
 
-    let inner = rx.recv_async().await.map_err(|_| {
-        CryptrError::Cli("stdin reader task terminated unexpectedly".to_string())
-    })?;
+    let inner = rx
+        .recv_async()
+        .await
+        .map_err(|_| CryptrError::Cli("stdin reader task terminated unexpectedly".to_string()))?;
     match inner? {
         None => Err(CryptrError::Cli(
             "Unexpected end of stdin (EOF) while reading a line".to_string(),

@@ -1,12 +1,12 @@
+use crate::CryptrError;
 use crate::encryption::ChunkSizeKb;
 use crate::stream::{EncStreamReader, LastStreamElement, StreamChunk};
 use crate::value::EncValueHeader;
-use crate::CryptrError;
 use async_trait::async_trait;
 use bytes::BytesMut;
 use flume::Sender;
 use futures::channel::oneshot;
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use s3_simple::Bucket;
 use std::fmt::Formatter;
 use std::time::Duration;
@@ -218,9 +218,8 @@ impl EncStreamReader for S3Reader<'_> {
 
                             // strip the header from the payload and set the correct chunk size
                             let _header_bytes = buf.split_to(payload_offset as usize);
-                            chunk_size = enc_header
-                                .chunk_size
-                                .value_bytes_with_mac(&enc_header.alg) as usize;
+                            chunk_size = enc_header.chunk_size.value_bytes_with_mac(&enc_header.alg)
+                                as usize;
 
                             header = Some(enc_header);
                         }

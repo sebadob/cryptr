@@ -198,7 +198,9 @@ fn encrypt_chacha_stream_v1(
         {
             error!("Error sending header over channel: {}", err);
             let _ = tx_cipher
-                .send_async(Err(CryptrError::Encryption("Error sending header over channel")))
+                .send_async(Err(CryptrError::Encryption(
+                    "Error sending header over channel",
+                )))
                 .await;
             return;
         }
@@ -327,9 +329,8 @@ fn decrypt_chacha_channel_stream_v1(
                             {
                                 let msg = "Error sending next plaintext over channel";
                                 error!("{}: {}", msg, err);
-                                let _ = tx_plain
-                                    .send_async(Err(CryptrError::Decryption(msg)))
-                                    .await;
+                                let _ =
+                                    tx_plain.send_async(Err(CryptrError::Decryption(msg))).await;
                                 return;
                             }
                         }
@@ -337,9 +338,7 @@ fn decrypt_chacha_channel_stream_v1(
                             let msg = "Error decrypting next stream value";
                             error!("{}: {}", msg, err);
                             error!("payload length: {}", payload.as_ref().len());
-                            let _ = tx_plain
-                                .send_async(Err(CryptrError::Decryption(msg)))
-                                .await;
+                            let _ = tx_plain.send_async(Err(CryptrError::Decryption(msg))).await;
                             return;
                         }
                     }
@@ -355,9 +354,7 @@ fn decrypt_chacha_channel_stream_v1(
                     error!("{}", msg);
                     // best-effort: if the receiver is already gone there is no one left
                     // to inform about this error
-                    let _ = tx_plain
-                        .send_async(Err(CryptrError::Decryption(msg)))
-                        .await;
+                    let _ = tx_plain.send_async(Err(CryptrError::Decryption(msg))).await;
                     return;
                 }
             }
@@ -373,9 +370,7 @@ fn decrypt_chacha_channel_stream_v1(
                     error!("{}: {}", msg, err);
                     // best-effort: if the receiver is already gone there is no one left
                     // to inform about this error
-                    let _ = tx_plain
-                        .send_async(Err(CryptrError::Decryption(msg)))
-                        .await;
+                    let _ = tx_plain.send_async(Err(CryptrError::Decryption(msg))).await;
                     return;
                 }
             }
@@ -384,9 +379,7 @@ fn decrypt_chacha_channel_stream_v1(
                 error!("{}: {}", msg, err);
                 // best-effort: if the receiver is already gone there is no one left
                 // to inform about this error
-                let _ = tx_plain
-                    .send_async(Err(CryptrError::Decryption(msg)))
-                    .await;
+                let _ = tx_plain.send_async(Err(CryptrError::Decryption(msg))).await;
                 return;
             }
         }

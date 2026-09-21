@@ -15,11 +15,11 @@ pub use bytes::Bytes;
 #[cfg(feature = "s3")]
 pub use stream::reader::s3_reader::S3Reader;
 #[cfg(feature = "streaming")]
-pub use stream::reader::{file_reader::FileReader, memory_reader::MemoryReader, StreamReader};
+pub use stream::reader::{StreamReader, file_reader::FileReader, memory_reader::MemoryReader};
 #[cfg(feature = "s3")]
 pub use stream::writer::s3_writer::S3Writer;
 #[cfg(feature = "streaming")]
-pub use stream::writer::{file_writer::FileWriter, memory_writer::MemoryWriter, StreamWriter};
+pub use stream::writer::{StreamWriter, file_writer::FileWriter, memory_writer::MemoryWriter};
 pub use value::{EncAlg, EncValue, EncValueHeader, EncVersion};
 
 pub mod encryption;

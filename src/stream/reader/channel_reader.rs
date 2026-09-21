@@ -1,12 +1,12 @@
+use crate::CryptrError;
 use crate::encryption::ChunkSizeKb;
 use crate::stream::EncStreamReader;
 use crate::stream::{LastStreamElement, StreamChunk};
-use crate::value::{EncValueHeader, CHANNELS};
-use crate::CryptrError;
+use crate::value::{CHANNELS, EncValueHeader};
 use async_trait::async_trait;
 use flume::Sender;
-use futures::channel::oneshot;
 use futures::StreamExt;
+use futures::channel::oneshot;
 use std::fmt::Formatter;
 use tokio::task::JoinHandle;
 use tracing::debug;
@@ -118,11 +118,12 @@ impl EncStreamReader for ChannelReader {
                 // a chunk larger than the first one violates the ChannelReader contract and
                 // would shift AEAD boundaries from this point on
                 if bytes.len() > len {
-                    let _ = tx.send_async(Err(CryptrError::Encryption(
-                        "Received a chunk larger than the first stream element - \
+                    let _ = tx
+                        .send_async(Err(CryptrError::Encryption(
+                            "Received a chunk larger than the first stream element - \
                          ChannelReader contract violation",
-                    )))
-                    .await;
+                        )))
+                        .await;
                     return Err(CryptrError::Encryption(
                         "Received a chunk larger than the first stream element - \
                          ChannelReader contract violation",

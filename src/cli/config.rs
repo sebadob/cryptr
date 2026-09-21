@@ -1,5 +1,5 @@
-use cryptr::keys::EncKeys;
 use cryptr::CryptrError;
+use cryptr::keys::EncKeys;
 use s3_simple::{AccessKeyId, AccessKeySecret, Bucket, BucketOptions, Credentials, Region};
 use std::env;
 use std::fmt::{Display, Formatter};
@@ -232,9 +232,12 @@ mod tests {
         fs::create_dir_all("./test_files").await.unwrap();
 
         // A line without '=' makes dotenvy fail to parse the file
-        fs::write(path, "ENC_KEY_ACTIVE=corruptKey1\nthis-line-has-no-equals\n")
-            .await
-            .unwrap();
+        fs::write(
+            path,
+            "ENC_KEY_ACTIVE=corruptKey1\nthis-line-has-no-equals\n",
+        )
+        .await
+        .unwrap();
 
         let err = EncConfig::read_or_default_at(path).await.unwrap_err();
         assert!(matches!(err, CryptrError::Generic(_)));

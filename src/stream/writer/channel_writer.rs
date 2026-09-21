@@ -1,6 +1,6 @@
+use crate::CryptrError;
 use crate::stream::{EncStreamWriter, LastStreamElement, StreamChunk};
 use crate::value::CHANNELS;
-use crate::CryptrError;
 use async_trait::async_trait;
 use flume::Receiver;
 use futures::SinkExt;

@@ -5,18 +5,18 @@ use crate::cli::config::EncConfig;
 use crate::cli::utils;
 use crate::cli::utils::PromptPassword;
 use colored::Colorize;
+use cryptr::CryptrError;
 use cryptr::keys::{EncKeys, EncKeysSealed};
+use cryptr::stream::reader::StreamReader;
 use cryptr::stream::reader::file_reader::FileReader;
 use cryptr::stream::reader::memory_reader::MemoryReader;
 use cryptr::stream::reader::s3_reader::S3Reader;
-use cryptr::stream::reader::StreamReader;
+use cryptr::stream::writer::StreamWriter;
 use cryptr::stream::writer::file_writer::FileWriter;
 use cryptr::stream::writer::memory_writer::MemoryWriter;
 use cryptr::stream::writer::s3_writer::S3Writer;
-use cryptr::stream::writer::StreamWriter;
 use cryptr::utils::{b64_decode, b64_encode};
 use cryptr::value::EncValue;
-use cryptr::CryptrError;
 use reqwest::Url;
 
 #[derive(Debug, PartialEq)]
@@ -49,7 +49,9 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
                     input
                 }
                 Action::Decrypt => {
-                    println!("Paste the base64 encoded secret you want to decrypt (end with Ctrl-D):");
+                    println!(
+                        "Paste the base64 encoded secret you want to decrypt (end with Ctrl-D):"
+                    );
                     let input = utils::read_stdin_all().await?;
                     // base64 is ASCII text; strip whitespace so multi-line pastes decode
                     let compact: String = input
@@ -315,7 +317,6 @@ pub async fn export_keys(args: ArgsKeysExport) -> Result<(), CryptrError> {
                 let (active_id, _) = keys.enc_keys.first().unwrap();
                 println!(
                     "Current active key is not in exported keys, setting new active to: {active_id}"
-
                 );
 
                 keys.enc_key_active.clone_from(active_id);
