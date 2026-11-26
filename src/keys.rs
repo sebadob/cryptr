@@ -27,15 +27,20 @@ impl Display for EncKeysSealed {
 }
 
 impl EncKeysSealed {
+    #[must_use]
     pub fn from_b64(value: String) -> Self {
         Self(value)
     }
 
+    #[must_use]
     pub fn from_bytes(value: &[u8]) -> Self {
         Self(b64_encode(value))
     }
 
     /// Expects the `ENC_KEYS_SEALED` environment variable with a base64 encoded string
+    ///
+    /// # Errors
+    /// `CryptrError::Config` when `ENC_KEYS_SEALED` is not set.
     pub fn try_from_env() -> Result<Self, CryptrError> {
         dotenvy::dotenv().ok();
         let s = env::var("ENC_KEYS_SEALED")?;
@@ -43,6 +48,9 @@ impl EncKeysSealed {
     }
 
     /// Seal the given encryption keys
+    ///
+    /// # Errors
+    /// `CryptrError::Encryption` when the keys cannot be encrypted with the password.
     pub fn seal(enc_keys: EncKeys, password: &str) -> Result<Self, CryptrError> {
         let keys_bytes: Vec<u8> = enc_keys.into_bytes();
         let enc = EncValue::encrypt_with_password(keys_bytes.as_slice(), password)?;
@@ -51,6 +59,10 @@ impl EncKeysSealed {
     }
 
     /// Unseal the given encryption keys
+    ///
+    /// # Errors
+    /// `CryptrError::Decryption` for a wrong password, `CryptrError::Keys` when the
+    /// unsealed bytes are not valid `EncKeys`.
     pub fn unseal(self, password: &str) -> Result<EncKeys, CryptrError> {
         let bytes = b64_decode(&self.0)?;
         let enc = EncValue::try_from_bytes(bytes)?;
@@ -59,11 +71,16 @@ impl EncKeysSealed {
         Ok(keys)
     }
 
+    /// # Errors
+    /// `CryptrError::File` when the file cannot be read.
     pub async fn read_from_file(path: &str) -> Result<Self, CryptrError> {
         let s = fs::read_to_string(path).await?;
         Ok(Self(s))
     }
 
+    /// # Errors
+    /// `CryptrError::File` when the target is a directory, or the file cannot be
+    /// created, permission-changed or written.
     pub async fn save_to_file(&self, path_full: &str) -> Result<(), CryptrError> {
         match File::open(&path_full).await {
             Ok(file) => {
@@ -123,11 +140,19 @@ impl From<KdfValue> for EncKeys {
 
 #[allow(dead_code)]
 impl EncKeys {
+    /// The compiled key ID regex, initialized on first use
+    ///
+    /// # Panics
+    /// If the key ID pattern above is not a valid regex, which is checked at compile
+    /// time by the `Regex` builder.
     #[inline]
     pub fn re_key_id() -> &'static Regex {
         RE_KEY_ID.get_or_init(|| Regex::new(r"^[a-zA-Z0-9:_-]{2,20}$").unwrap())
     }
 
+    /// # Errors
+    /// `CryptrError::Keys` for a key line with an empty ID or key, a key that is not
+    /// exactly 32 bytes, or an ID outside the allowed pattern.
     pub fn try_parse(
         enc_key_active: String,
         enc_keys_unparsed: Vec<String>,
@@ -147,12 +172,20 @@ impl EncKeys {
     }
 
     /// Generates and appends a new random encryption key
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` when the generated ID already exists, `CryptrError::Generic`
+    /// when the system RNG cannot be reached.
     pub fn append_new_random(&mut self) -> Result<(), CryptrError> {
         let id = secure_random_alnum(12);
         self.append_new_random_with_id(id)
     }
 
     /// Generates and appends a new random encryption key with a specific ID
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` when the ID exists already or does not match the key ID
+    /// pattern, `CryptrError::Generic` when the system RNG cannot be reached.
     pub fn append_new_random_with_id(&mut self, id: String) -> Result<(), CryptrError> {
         Self::validate_id(&id, Some(self))?;
 
@@ -166,6 +199,10 @@ impl EncKeys {
     /// Returns the default config path.
     ///
     /// Available with feature `cli` only
+    ///
+    /// # Errors
+    /// `CryptrError::File` when `$HOME` is unavailable, or the `.cryptr` directory
+    /// cannot be created.
     #[cfg(feature = "cli")]
     pub async fn config_path() -> Result<String, CryptrError> {
         let home_path = home::home_dir().ok_or(CryptrError::File("Cannot get $HOME"))?;
@@ -183,6 +220,9 @@ impl EncKeys {
     }
 
     /// Mutate the keys and deletes the key with the given ID, if it exists
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` when the given ID is the currently active key.
     pub fn delete(&mut self, enc_key_id: &str) -> Result<(), CryptrError> {
         if self.enc_key_active == enc_key_id {
             return Err(CryptrError::Keys("Cannot delete the currently active key"));
@@ -219,13 +259,14 @@ impl EncKeys {
         skipped
     }
 
-    /// Formats a converted ENC_KEYS string in the correct format for config / K8s secret
+    /// Formats a converted `ENC_KEYS` string in the correct format for config / K8s secret
     ///
     /// This is useful for generating keys somewhere else to paste them into K8s / Docker definitions later on.
     ///
     /// # Returns 2 values:
     /// 1. `ENC_KEYS=` value for a config or environment variable
     /// 2. `ENC_KEYS: ` with an additional base64 encoding which can be used inside a K8s secret directly
+    #[must_use]
     pub fn fmt_enc_keys_str_for_config(enc_keys: &str) -> (String, String) {
         let value_v64 = b64_encode(enc_keys.as_bytes());
 
@@ -238,6 +279,10 @@ impl EncKeys {
     /// Reads the keys from the default config
     ///
     /// Available with feature `cli` only
+    ///
+    /// # Errors
+    /// `CryptrError::Config` when the config has not been set up yet, `CryptrError::Keys`
+    /// when the config values do not parse into valid keys.
     #[cfg(feature = "cli")]
     pub async fn read_from_config() -> Result<Self, CryptrError> {
         let path = Self::config_path().await?;
@@ -249,6 +294,10 @@ impl EncKeys {
     }
 
     /// Reads the keys from a given file location on disk
+    ///
+    /// # Errors
+    /// `CryptrError::Config` when the file cannot be read as a dotenv file,
+    /// `CryptrError::Keys` when the values inside do not parse into valid keys.
     pub fn read_from_file(path: &str) -> Result<Self, CryptrError> {
         dotenvy::from_filename(path)?;
         Self::from_env()
@@ -265,6 +314,11 @@ impl EncKeys {
     /// test1337/HQyncjvJUNLTv2YvoTWeVmMKQLBe7+xVSHMXUVES8qE=
     /// "
     /// ```
+    ///
+    /// # Errors
+    /// `CryptrError::Config` when `ENC_KEY_ACTIVE` or `ENC_KEYS` is not set,
+    /// `CryptrError::Keys` for a key with an empty ID or key, a key that is not exactly
+    /// 32 bytes, or an ID outside the allowed pattern.
     pub fn from_env() -> Result<Self, CryptrError> {
         dotenvy::dotenv().ok();
         let enc_key_active = env::var("ENC_KEY_ACTIVE")?;
@@ -323,6 +377,9 @@ impl EncKeys {
     }
 
     /// All keys merged into a single `String` for usage via ENV vars
+    ///
+    /// # Errors
+    /// `CryptrError::Generic` when the key list cannot be written into the `String`.
     pub fn keys_as_b64(&self) -> Result<String, CryptrError> {
         let mut keys = String::with_capacity(self.enc_keys.len() * 56);
         for (id, key) in &self.enc_keys {
@@ -333,6 +390,7 @@ impl EncKeys {
     }
 
     /// All keys converted to b64 inside a `Vec<_>`.
+    #[must_use]
     pub fn keys_as_b64_vec(&self) -> Vec<String> {
         self.enc_keys
             .iter()
@@ -340,6 +398,9 @@ impl EncKeys {
             .collect::<Vec<_>>()
     }
 
+    /// # Errors
+    /// `CryptrError::Keys` when the key list is empty, `CryptrError::File` when the
+    /// target is a directory, or the file cannot be created, permission-changed or written.
     pub async fn save_to_file(&self, file: &str) -> Result<(), CryptrError> {
         // check if we need to split off the a filename from a path
         match file.rsplit_once('/') {
@@ -351,6 +412,10 @@ impl EncKeys {
         }
     }
 
+    /// # Errors
+    /// `CryptrError::Keys` when the key list is empty, or the target path is a
+    /// directory. `CryptrError::File` when the directory cannot be created, or the file
+    /// cannot be created, permission-changed or written.
     pub async fn save_to_file_with_path(
         &self,
         path: &str,
@@ -396,7 +461,10 @@ impl EncKeys {
         Ok(())
     }
 
-    /// Returns a reference to specified EncKey
+    /// Returns a reference to specified `EncKey`
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` when the given key ID does not exist.
     pub fn get_key(&self, enc_key_id: &str) -> Result<&[u8], CryptrError> {
         for (id, key) in &self.enc_keys {
             if id.as_str() == enc_key_id {
@@ -406,22 +474,28 @@ impl EncKeys {
         Err(CryptrError::Keys("EncKey ID does not exist"))
     }
 
-    /// Returns a reference to the initialized EncKeys.
+    /// Returns a reference to the initialized `EncKeys`.
     ///
     /// `init()` must have been called at application startup for this to succeed.
     ///
     /// # Panics
     ///
-    /// If the EncKeys have not been set up at startup with `init()`
+    /// If the `EncKeys` have not been set up at startup with `init()`
     pub fn get_static<'a>() -> &'a Self {
         ENC_KEYS
             .get()
             .expect("`init()` to have been called on valid EncKeys once before")
     }
 
-    /// Returns a reference to specified EncKey
+    /// Returns a reference to specified `EncKey`
     ///
     /// `init()` must have been called at application startup for this to succeed.
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` when the given key ID does not exist.
+    ///
+    /// # Panics
+    /// If the `EncKeys` have not been set up at startup with `init()`
     pub fn get_static_key<'a>(enc_key_id: &str) -> Result<&'a [u8], CryptrError> {
         let keys = Self::get_static();
         for (id, key) in &keys.enc_keys {
@@ -432,9 +506,15 @@ impl EncKeys {
         Err(CryptrError::Keys("EncKey ID does not exist"))
     }
 
-    /// Returns a reference to currently active EncKey
+    /// Returns a reference to currently active `EncKey`
     ///
     /// `init()` must have been called at application startup for this to succeed.
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` when the active key ID does not exist.
+    ///
+    /// # Panics
+    /// If the `EncKeys` have not been set up at startup with `init()`
     pub fn get_key_active<'a>() -> Result<&'a [u8], CryptrError> {
         let keys = Self::get_static();
         let active_id = &keys.enc_key_active;
@@ -452,6 +532,9 @@ impl EncKeys {
     /// any function that uses the static keys.
     ///
     /// Throws an error if called more than once.
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` when `init()` has already been called before.
     pub fn init(self) -> Result<(), CryptrError> {
         if ENC_KEYS.set(self).is_err() {
             Err(CryptrError::Keys(
@@ -463,12 +546,22 @@ impl EncKeys {
     }
 
     /// Generates a new random encryption key
+    ///
+    /// # Errors
+    /// `CryptrError::Generic` when the system RNG cannot be reached.
     pub fn generate() -> Result<Self, CryptrError> {
         let id = secure_random_alnum(12);
         Self::generate_with_id(id)
     }
 
     /// Generates a new random set of encryption keys
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` when `number_of_keys` is 0, `CryptrError::Generic` when the
+    /// system RNG cannot be reached.
+    ///
+    /// # Panics
+    /// If no key was generated, which the `number_of_keys` check above excludes.
     pub fn generate_multiple(number_of_keys: u16) -> Result<Self, CryptrError> {
         if number_of_keys < 1 {
             return Err(CryptrError::Keys("number_of_keys must be greater than 1"));
@@ -478,16 +571,24 @@ impl EncKeys {
         for _ in 0..number_of_keys {
             let id = secure_random_alnum(12);
             let key = secure_random_vec(32)?;
-            enc_keys.push((id, key))
+            enc_keys.push((id, key));
         }
 
         Ok(Self {
-            enc_key_active: enc_keys.first().unwrap().0.clone(),
+            enc_key_active: enc_keys
+                .first()
+                .expect("number_of_keys >= 1 generates at least one key")
+                .0
+                .clone(),
             enc_keys,
         })
     }
 
     /// Generates a new random encryption key with a specific ID
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` when the ID does not match the key ID pattern,
+    /// `CryptrError::Generic` when the system RNG cannot be reached.
     pub fn generate_with_id(id: String) -> Result<Self, CryptrError> {
         Self::validate_id(&id, None)?;
         let key = secure_random_vec(32)?;
@@ -501,6 +602,10 @@ impl EncKeys {
     /// Used for compatibility with the older system
     ///
     /// This will convert the old encryption key format into the new one
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` for a key without the `id/key` separator, an empty ID or key,
+    /// a key that is not 32 bytes long, or an ID outside the allowed pattern.
     pub fn try_convert_legacy_keys(keys: &str) -> Result<String, CryptrError> {
         let mut keys_map: HashMap<String, Vec<u8>> = HashMap::new();
 
@@ -571,17 +676,17 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore] // Overlaps with the from file test case
+    #[ignore = "Overlaps with the from file test case"]
     async fn test_enc_from_env() {
         unsafe {
             env::set_var("ENC_KEY_ACTIVE", "zQac11NaE0Nn");
             env::set_var(
                 "ENC_KEYS",
-                r#"
+                r"
     zQac11NaE0Nn/UZFxllgmmnA5KzBr7A6uS+p/ccLe2/L4M4Vs3CMhwQg=
     nlL1mQjkQH58/lPfvTp7RojBOU8aNzZrfYQ44ykm0SR/DaZmvMZMmXkY=
     26VvcHiaJP26/Cu8I2NEzD2tjKV+2Tl6Dwx2tkPOMyolYP1ydTcN+hik=
-    "#,
+    ",
             );
         }
 
@@ -599,7 +704,7 @@ mod tests {
         let file_name = "keys";
         keys.save_to_file_with_path(path, file_name).await.unwrap();
 
-        let path_full = format!("{}/{}", path, file_name);
+        let path_full = format!("{path}/{file_name}");
 
         let keys_from = EncKeys::read_from_file(&path_full).unwrap();
         assert_eq!(keys, keys_from);
@@ -705,12 +810,12 @@ mod tests {
     #[test]
     fn test_fmt_config_str() {
         let legacy_str = "bVCyTsGaggVy5yqQ/S9n7oCen53xSJLzcsmfdnBDvNrqQ63r4 q6u26onRvXVG4427/3CEC8RJWBcMkrBMkRXgx65AmJsNTghSA";
-        let converted = EncKeys::try_convert_legacy_keys(&legacy_str)
+        let converted = EncKeys::try_convert_legacy_keys(legacy_str)
             .expect("legacy key conversion to be successful");
 
         let (cfg_value, _secrets_value) = EncKeys::fmt_enc_keys_str_for_config(&converted);
 
-        println!("\n{}\n", cfg_value);
+        println!("\n{cfg_value}\n");
         assert!(
             cfg_value.contains("q6u26onRvXVG4427/M0NFQzhSSldCY01rckJNa1JYZ3g2NUFtSnNOVGdoU0E=\n")
         );

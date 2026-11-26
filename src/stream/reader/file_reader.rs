@@ -1,7 +1,7 @@
 use crate::CryptrError;
 use crate::encryption::ChunkSizeKb;
 use crate::stream::EncStreamReader;
-use crate::stream::{LastStreamElement, StreamChunk};
+use crate::stream::{LastStreamElement, StreamChunk, size_units};
 use crate::value::EncValueHeader;
 use async_trait::async_trait;
 use flume::Sender;
@@ -22,7 +22,7 @@ use std::os::unix::fs::MetadataExt;
 // #[cfg(target_os = "windows")]
 // use std::os::windows::fs::MetadataExt;
 
-/// Streaming FileReader
+/// Streaming `FileReader`
 ///
 /// Available with feature `streaming` only
 #[derive(Debug)]
@@ -59,6 +59,12 @@ impl EncStreamReader for FileReader<'_> {
             chunk_size = filesize;
         }
 
+        // the read buffer is sized in `usize` terms, a chunk that does not fit the
+        // address space of the target can never be read
+        let chunk_len = usize::try_from(chunk_size).map_err(|_| {
+            CryptrError::Config("chunk size exceeds the address space of this target")
+        })?;
+
         // An empty input produces exactly one empty last chunk (and avoids a divide-by-zero)
         let chunks_total = match filesize.checked_div(chunk_size) {
             Some(quotient) => {
@@ -71,11 +77,11 @@ impl EncStreamReader for FileReader<'_> {
             None => 1,
         };
 
-        let tx_progress = Self::spawn_progress(self.print_progress, self.path, filesize).await;
+        let tx_progress = Self::spawn_progress(self.print_progress, self.path, filesize);
 
         let handle = tokio::spawn(async move {
-            let mut buf = Vec::with_capacity(chunk_size as usize);
-            (0..chunk_size).for_each(|_| buf.push(0));
+            let mut buf = Vec::with_capacity(chunk_len);
+            (0..chunk_len).for_each(|_| buf.push(0));
 
             let mut total = 0;
             let mut counter = 0;
@@ -84,7 +90,7 @@ impl EncStreamReader for FileReader<'_> {
                 // read up to chunk_size bytes, but keep reading until the buffer is full
                 // or the file is exhausted - a short read would shift AEAD boundaries
                 let mut length = 0usize;
-                while (length as u64) < chunk_size {
+                while length < chunk_len {
                     let n = f.read(&mut buf[length..]).await?;
                     if n == 0 {
                         break; // EOF
@@ -130,6 +136,12 @@ impl EncStreamReader for FileReader<'_> {
         let chunk_size = header.chunk_size.value_bytes_with_mac(&header.alg) as u64;
         let payload_offset = payload_offset as u64;
 
+        // the read buffer is sized in `usize` terms, a chunk that does not fit the
+        // address space of the target can never be read
+        let chunk_len = usize::try_from(chunk_size).map_err(|_| {
+            CryptrError::Config("chunk size exceeds the address space of this target")
+        })?;
+
         // initialize the streaming manager (best-effort: if the receiver is already gone,
         // the chunk channel below will fail and the reader task exits with an error)
         let _ = tx_init.send((header, nonce));
@@ -157,11 +169,11 @@ impl EncStreamReader for FileReader<'_> {
             chunks_total += 1;
         }
 
-        let tx_progress = Self::spawn_progress(self.print_progress, self.path, filesize).await;
+        let tx_progress = Self::spawn_progress(self.print_progress, self.path, filesize);
 
         let handle: JoinHandle<Result<(), CryptrError>> = tokio::spawn(async move {
-            let mut buf = Vec::with_capacity(chunk_size as usize);
-            (0..chunk_size).for_each(|_| buf.push(0));
+            let mut buf = Vec::with_capacity(chunk_len);
+            (0..chunk_len).for_each(|_| buf.push(0));
 
             let mut total = 0;
             let mut counter = 0;
@@ -170,7 +182,7 @@ impl EncStreamReader for FileReader<'_> {
                 // read up to chunk_size bytes, but keep reading until the buffer is full
                 // or the file is exhausted - a short read would shift AEAD boundaries
                 let mut length = 0usize;
-                while (length as u64) < chunk_size {
+                while length < chunk_len {
                     let n = file.read(&mut buf[length..]).await?;
                     if n == 0 {
                         break; // EOF
@@ -200,23 +212,19 @@ impl EncStreamReader for FileReader<'_> {
 }
 
 impl FileReader<'_> {
-    async fn spawn_progress(
-        print_progress: bool,
-        path: &str,
-        filesize: u64,
-    ) -> watch::Sender<usize> {
+    fn spawn_progress(print_progress: bool, path: &str, filesize: u64) -> watch::Sender<usize> {
         let (tx_progress, rx_progess) = sync::watch::channel(0);
         if print_progress {
             let path = path.to_string();
             tokio::spawn(async move {
                 let (div, unit) = if filesize > 1024 * 1024 * 10 {
-                    ((1024 * 1024) as f64, "MiB")
+                    (1024u64 * 1024, "MiB")
                 } else if filesize > 1024 * 10 {
-                    ((1024 * 10) as f64, "KiB")
+                    (1024u64 * 10, "KiB")
                 } else {
-                    (1f64, "Bytes")
+                    (1u64, "Bytes")
                 };
-                let target = filesize as f64 / div;
+                let (t_whole, t_frac) = size_units(filesize, div);
                 let start = Instant::now();
 
                 let mut interval = time::interval(Duration::from_secs(5));
@@ -224,13 +232,16 @@ impl FileReader<'_> {
 
                 loop {
                     interval.tick().await;
-                    let progress = *rx_progess.borrow() as f64 / div;
-                    let rate = progress / start.elapsed().as_secs() as f64;
+                    let done = *rx_progess.borrow() as u64;
+                    let (p_whole, p_frac) = size_units(done, div);
+                    // the first tick lands on second 0, which must not divide
+                    let (r_whole, r_frac) =
+                        size_units(done / start.elapsed().as_secs().max(1), div);
                     println!(
-                        "FileReader ({path}) {progress:.02} / {target:.02} {unit} \
-                        -> {rate:.02} {unit}/s"
+                        "FileReader ({path}) {p_whole}.{p_frac:02} / \
+                        {t_whole}.{t_frac:02} {unit} -> {r_whole}.{r_frac:02} {unit}/s"
                     );
-                    if progress >= target {
+                    if done >= filesize {
                         break;
                     }
                 }

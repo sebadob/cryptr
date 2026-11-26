@@ -52,11 +52,13 @@ impl Default for ChunkSizeKb {
 
 impl ChunkSizeKb {
     #[inline]
+    #[must_use]
     pub fn value(&self) -> u16 {
         self.0
     }
 
     #[inline]
+    #[must_use]
     pub fn value_bytes(&self) -> u32 {
         self.0 as u32 * 1024
     }
@@ -66,6 +68,7 @@ impl ChunkSizeKb {
     /// need to include the MAC from the AEAD algorithm.
     /// Returns the correct chunk size in bytes.
     #[inline]
+    #[must_use]
     pub fn value_bytes_with_mac(&self, alg: &EncAlg) -> u32 {
         self.0 as u32 * 1024 + alg.mac_size() as u32
     }
@@ -213,7 +216,7 @@ fn encrypt_chacha_stream_v1(
                         debug!("Received last element in encrypt_chacha_stream_v1");
                         std::mem::swap(&mut payload_last, &mut payload);
                         break;
-                    };
+                    }
 
                     match encryptor.encrypt_next(payload.as_ref()) {
                         Ok(ciperthext) => {
@@ -316,7 +319,7 @@ fn decrypt_chacha_channel_stream_v1(
                         debug!("Received last element in decrypt_chacha_stream_v1");
                         std::mem::swap(&mut payload_last, &mut payload);
                         break;
-                    };
+                    }
 
                     match decryptor.decrypt_next(payload.as_ref()) {
                         Ok(plaintext) => {

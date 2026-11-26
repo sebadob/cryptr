@@ -5,18 +5,25 @@ use rand::{RngExt, TryRng};
 const B64_STD: engine::GeneralPurpose = general_purpose::STANDARD;
 
 /// Base64 encode the given input
-#[inline]
+#[must_use]
 pub fn b64_encode(input: &[u8]) -> String {
     B64_STD.encode(input)
 }
 
 /// Base64 decode the given String
+///
+/// # Errors
+/// `CryptrError::Generic` when the input is not valid Base64, or decodes to
+/// invalid UTF-8.
 #[inline]
 pub fn b64_decode(b64: &str) -> Result<Vec<u8>, CryptrError> {
     Ok(B64_STD.decode(b64)?)
 }
 
 /// Fills the given buffer with random bytes
+///
+/// # Errors
+/// `CryptrError::Generic` when the system RNG cannot be reached.
 #[inline]
 pub fn secure_random(buf: &mut [u8]) -> Result<(), CryptrError> {
     rand::rng()
@@ -26,6 +33,9 @@ pub fn secure_random(buf: &mut [u8]) -> Result<(), CryptrError> {
 }
 
 /// Returns a random `Vec<u8>` with the specified size
+///
+/// # Errors
+/// `CryptrError::Generic` when the system RNG cannot be reached.
 #[inline]
 pub fn secure_random_vec(size: usize) -> Result<Vec<u8>, CryptrError> {
     let mut buf = Vec::with_capacity(size);

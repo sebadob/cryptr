@@ -35,12 +35,12 @@ impl Display for S3Config {
 
         write!(
             f,
-            r#"S3 Config
+            r"S3 Config
 URL:            {url}
 Use path style: {}
 Region:         {region}
 Access Key:     {access_key}
-Access Secret:  <hidden>"#,
+Access Secret:  <hidden>",
             self.path_style
         )
     }
@@ -68,27 +68,26 @@ impl S3Config {
         Ok(bucket)
     }
 
-    pub async fn read_from_file(path: &str) -> Result<Self, CryptrError> {
+    pub fn read_from_file(path: &str) -> Result<Self, CryptrError> {
         dotenvy::from_filename(path)?;
-        Self::from_env().await
+        Ok(Self::from_env())
     }
 
-    pub async fn from_env() -> Result<Self, CryptrError> {
+    pub fn from_env() -> Self {
         let url = env::var("S3_URL").unwrap_or_default();
-        let path_style = env::var("S3_PATH_STYLE")
-            .map(|s| s.parse::<bool>().unwrap_or_default())
-            .unwrap_or_default();
+        let path_style =
+            env::var("S3_PATH_STYLE").is_ok_and(|s| s.parse::<bool>().unwrap_or_default());
         let region = env::var("S3_REGION").unwrap_or_default();
         let access_key = env::var("S3_ACCESS_KEY").unwrap_or_default();
         let access_secret = env::var("S3_ACCESS_SECRET").unwrap_or_default();
 
-        Ok(Self {
+        Self {
             url,
             path_style,
             region,
             access_key,
             access_secret,
-        })
+        }
     }
 }
 
@@ -101,7 +100,7 @@ pub struct EncConfig {
 impl EncConfig {
     pub async fn read() -> Result<Self, CryptrError> {
         let path = EncKeys::config_path().await?;
-        Self::read_from_file(&path).await
+        Self::read_from_file(&path)
     }
 
     /// Reads the config for a mutation workflow.
@@ -115,7 +114,7 @@ impl EncConfig {
     }
 
     async fn read_or_default_at(path: &str) -> Result<Self, CryptrError> {
-        match Self::read_from_file(path).await {
+        match Self::read_from_file(path) {
             Ok(config) => Ok(config),
             Err(err) => {
                 if fs::metadata(path).await.is_ok() {
@@ -129,9 +128,9 @@ impl EncConfig {
         }
     }
 
-    pub async fn read_from_file(path: &str) -> Result<Self, CryptrError> {
+    pub fn read_from_file(path: &str) -> Result<Self, CryptrError> {
         let enc_keys = EncKeys::read_from_file(path)?;
-        let s3_config = S3Config::read_from_file(path).await?;
+        let s3_config = S3Config::read_from_file(path)?;
         Ok(Self {
             enc_keys,
             s3_config,

@@ -3,9 +3,12 @@ name = "streaming"
 version = "0.1.0"
 edition = "2021"
 
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+
 [dependencies]
 cryptr = { path = "../..", features = ["streaming"] }
 
-anyhow = "1.0.75"
 sha2 = "0.10.8"
 tokio = { version = "1.38.2", features = ["rt-multi-thread"] }

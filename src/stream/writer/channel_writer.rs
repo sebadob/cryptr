@@ -19,6 +19,7 @@ pub type ChannelReceiver = futures::channel::mpsc::Receiver<Result<Vec<u8>, Cryp
 pub struct ChannelWriter(futures::channel::mpsc::Sender<Result<Vec<u8>, CryptrError>>);
 
 impl ChannelWriter {
+    #[must_use]
     pub fn new() -> (Self, ChannelReceiver) {
         let (tx, rx) = futures::channel::mpsc::channel(CHANNELS);
         (Self(tx.clone()), rx)

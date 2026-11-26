@@ -56,7 +56,7 @@ fn test_shell_io_multiline_and_binary_roundtrip() {
     // added by the pipe/paste is stripped (previously only the first line was read)
     let stdout = run_cryptr(home, "encrypt", b"hello\nworld\n");
     let mut b64 = extract_after(&stdout, b"Base64 encoded encrypted secret:\n");
-    while matches!(b64.last(), Some(b'\n') | Some(b'\r')) {
+    while matches!(b64.last(), Some(b'\n' | b'\r')) {
         b64.pop();
     }
 
@@ -69,7 +69,7 @@ fn test_shell_io_multiline_and_binary_roundtrip() {
     let binary: Vec<u8> = (0u8..=255u8).collect();
     let stdout = run_cryptr(home, "encrypt", &binary);
     let mut b64 = extract_after(&stdout, b"Base64 encoded encrypted secret:\n");
-    while matches!(b64.last(), Some(b'\n') | Some(b'\r')) {
+    while matches!(b64.last(), Some(b'\n' | b'\r')) {
         b64.pop();
     }
 

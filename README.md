@@ -37,7 +37,7 @@ columns and needed to handle all of this manually each time. This is not the cas
 What `cryptr` can do as well is streaming encryption on-the-fly with very minimal memory usage.
 
 I use it for instance to do a streaming replication of database backups to an external storage. It can basically handle
-**files of any size**, read them piece by piece, do an on-the-fly streaming encryption using **ChaCha20Poly1305** and
+**files of any size**, read them piece by piece, do an on-the-fly streaming encryption using **`ChaCha20Poly1305`** and
 then stream the chunks to the external **S3 object storage** directly.
 
 Performance does not suffer from this at all. The load and tasks are spread over multiple cores internally and 4 small
@@ -49,7 +49,7 @@ or whoever has access to it.
 
 ### Tamper Resistant
 
-`cryptr` uses AEAD streaming encryption algorithms (only ChaCha20Poly1305 at the moment). This means, that the whole
+`cryptr` uses AEAD streaming encryption algorithms (only `ChaCha20Poly1305` at the moment). This means, that the whole
 encrypted payload and each streamed chunk have appended MACs. Even if someone would tamper with your data, the worst
 thing that can happen, is that the encryption does not work or actually complain, that the payload is corrupted. The
 data is not only encrypted, but validated at the same time, that it is still the original value.
