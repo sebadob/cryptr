@@ -11,6 +11,8 @@ mod logging;
 pub(crate) mod utils;
 
 pub async fn run() -> Result<(), CryptrError> {
+    cryptr::utils::install_crypto_provider().map_err(|err| CryptrError::Cli(err.to_string()))?;
+
     let level = logging::setup_logging();
     debug!("Log Level set to {}", level);
 

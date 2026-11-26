@@ -44,6 +44,26 @@ pub fn secure_random_alnum(count: usize) -> String {
         .collect::<String>()
 }
 
+/// Installs the rustls crypto provider that the enabled feature selected
+///
+/// cryptr has no init hook, so call this once at startup, before the first S3
+/// request. `aws_lc_rs` installs aws-lc-rs, `ring` installs ring.
+///
+/// # Errors
+/// `CryptrError::Config` when a provider was already installed, which happens
+/// when an embedding crate installed its own backend.
+#[cfg(any(feature = "aws_lc_rs", feature = "ring"))]
+pub fn install_crypto_provider() -> Result<(), CryptrError> {
+    let provider = cfg_select! {
+        feature = "ring" => rustls::crypto::ring::default_provider(),
+        _ => rustls::crypto::aws_lc_rs::default_provider(),
+    };
+
+    provider
+        .install_default()
+        .map_err(|_| CryptrError::Config("a rustls crypto provider was already installed"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
