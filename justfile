@@ -14,28 +14,40 @@ check:
     clear
     cargo update
 
-    echo 'Clippy with default'
-    cargo +nightly clippy -- -D warnings
-    echo 'Clippy with s3'
-    cargo +nightly clippy --features s3 -- -D warnings
-    echo 'Clippy with streaming'
-    cargo +nightly clippy --features streaming -- -D warnings
-    echo 'Clippy with cli'
-    cargo +nightly clippy --features cli -- -D warnings
+    # The full feature matrix. `aws_lc_rs` and `ring` are mutually exclusive, so
+    # `--all-features` is not a valid combination. The no-backend build (`s3` and
+    # `streaming` off) is not checkable here: the dev-dependency on cryptr with `cli`
+    # unifies `s3` and `streaming` into every build, so the backend guard in lib.rs
+    # fires for the tests as well as for `--lib`.
+    echo 'Clippy with aws_lc_rs (default)'
+    cargo +nightly clippy --all-targets -- -D warnings
+    echo 'Clippy with ring'
+    cargo +nightly clippy --no-default-features --features ring --all-targets -- -D warnings
+    echo 'Clippy with s3 + aws_lc_rs'
+    cargo +nightly clippy --all-targets --features s3 -- -D warnings
+    echo 'Clippy with s3 + ring'
+    cargo +nightly clippy --no-default-features --features ring,s3 --all-targets -- -D warnings
+    echo 'Clippy with streaming + aws_lc_rs'
+    cargo +nightly clippy --all-targets --features streaming -- -D warnings
+    echo 'Clippy with streaming + ring'
+    cargo +nightly clippy --no-default-features --features ring,streaming --all-targets -- -D warnings
+    echo 'Clippy with cli + aws_lc_rs'
+    cargo +nightly clippy --all-targets --features cli -- -D warnings
+    echo 'Clippy with cli + ring'
+    cargo +nightly clippy --no-default-features --features ring,cli --all-targets -- -D warnings
 
     echo 'Checking minimal versions'
     cargo minimal-versions check
     cargo update
 
     echo 'Checking examples'
-    cd examples/cli
-    cargo clippy
+    cd examples/simple-in-memory
+    cargo clippy --all-targets -- -D warnings
     cd ../in-memory-dynamic-keys
-    cargo clippy
-    cd ../simple-in-memory
-    cargo clippy
+    cargo clippy --all-targets -- -D warnings
     cd ../streaming-file-to-file
-    cargo clippy
+    cargo clippy --all-targets -- -D warnings
+    cd ../..
 
 # runs tests without s3
 test:

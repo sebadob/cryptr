@@ -66,11 +66,8 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
             StreamReader::Memory(MemoryReader(bytes))
         }
         Some(s) => {
-            let (prefix, path) = match s.split_once(':') {
-                None => {
-                    return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
-                }
-                Some(split) => split,
+            let Some((prefix, path)) = s.split_once(':') else {
+                return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
             };
 
             if prefix == "file" {
@@ -79,11 +76,8 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
                     print_progress: args.show_progress,
                 })
             } else if prefix == "s3" {
-                let (bucket_name, object) = match path.split_once('/') {
-                    None => {
-                        return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
-                    }
-                    Some(split) => split,
+                let Some((bucket_name, object)) = path.split_once('/') else {
+                    return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
                 };
                 if object.is_empty() {
                     return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
@@ -111,11 +105,8 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
     let writer = match &args.to {
         None => StreamWriter::Memory(MemoryWriter(&mut writer_memory_buf)),
         Some(s) => {
-            let (prefix, path) = match s.split_once(':') {
-                None => {
-                    return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
-                }
-                Some(split) => split,
+            let Some((prefix, path)) = s.split_once(':') else {
+                return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
             };
 
             if prefix == "file" {
@@ -124,11 +115,8 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
                     overwrite_target: true,
                 })
             } else if prefix == "s3" {
-                let (bucket_name, object) = match path.split_once('/') {
-                    None => {
-                        return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
-                    }
-                    Some(split) => split,
+                let Some((bucket_name, object)) = path.split_once('/') else {
+                    return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
                 };
                 if object.is_empty() {
                     return Err(CryptrError::Cli(ArgsEncryptDecrypt::from_to_fmt()));
@@ -157,13 +145,13 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
                     return Err(CryptrError::Password("The passwords do not match"));
                 }
 
-                EncValue::encrypt_stream_with_password(reader, writer, &password).await?
+                EncValue::encrypt_stream_with_password(reader, writer, &password).await?;
             }
             Action::Decrypt => {
                 let password = prompt
                     .prompt("Provide the decryption password".to_string())
                     .await?;
-                EncValue::decrypt_stream_with_password(reader, writer, &password).await?
+                EncValue::decrypt_stream_with_password(reader, writer, &password).await?;
             }
         }
     } else if let Some(id) = args.with_key_id {
@@ -171,7 +159,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
         match action {
             Action::Encrypt => EncValue::encrypt_stream_with_key_id(reader, writer, id).await?,
             Action::Decrypt => EncValue::decrypt_stream(reader, writer).await?,
-        };
+        }
     } else {
         match action {
             Action::Encrypt => EncValue::encrypt_stream(reader, writer).await?,
@@ -183,7 +171,7 @@ pub async fn encrypt_decrypt(args: ArgsEncryptDecrypt, action: Action) -> Result
         match action {
             Action::Encrypt => {
                 let s = b64_encode(&writer_memory_buf);
-                println!("\nBase64 encoded encrypted secret:\n{s}")
+                println!("\nBase64 encoded encrypted secret:\n{s}");
             }
             Action::Decrypt => {
                 // write raw bytes so binary secrets are not mangled
@@ -286,7 +274,7 @@ pub async fn export_keys(args: ArgsKeysExport) -> Result<(), CryptrError> {
             if ids.contains(&id.as_str()) {
                 if id == &keys.enc_key_active {
                     contains_active_key = true;
-                };
+                }
                 true
             } else {
                 false
@@ -328,13 +316,12 @@ pub async fn export_keys(args: ArgsKeysExport) -> Result<(), CryptrError> {
 
                 for i in 0..keys_len {
                     let (id, _) = keys.enc_keys.get(i).unwrap();
-                    println!("{} : {id}", i + 1);
+                    println!("{} : {}", i + 1, id);
                 }
 
                 let mut input;
                 print!(
-                    "\nEnter the number of the key you want to set as active (1 - {})? ",
-                    keys_len
+                    "\nEnter the number of the key you want to set as active (1 - {keys_len})? "
                 );
                 loop {
                     input = utils::read_line_stdin().await?;
@@ -350,8 +337,7 @@ pub async fn export_keys(args: ArgsKeysExport) -> Result<(), CryptrError> {
                         }
                         Err(_) => {
                             eprint!(
-                                "\nEnter a valid number of the key you want to set as active (1 - {})? ",
-                                keys_len
+                                "\nEnter a valid number of the key you want to set as active (1 - {keys_len})? "
                             );
                         }
                     }
@@ -393,12 +379,9 @@ pub async fn import_keys(args: ArgsKeysImport) -> Result<(), CryptrError> {
         .await?;
     println!();
 
-    let keys = match sealed.unseal(&password) {
-        Ok(keys) => keys,
-        Err(_) => {
-            return Err(CryptrError::Decryption("Cannot decrypt the given keys"));
-        }
-    };
+    let keys = sealed
+        .unseal(&password)
+        .map_err(|_| CryptrError::Decryption("Cannot decrypt the given keys"))?;
 
     let config = match EncConfig::read().await {
         Ok(mut config) => {
@@ -434,12 +417,9 @@ pub async fn import_keys(args: ArgsKeysImport) -> Result<(), CryptrError> {
 }
 
 pub async fn delete_key() -> Result<(), CryptrError> {
-    let mut config = match EncConfig::read().await {
-        Ok(config) => config,
-        Err(_) => {
-            return Err(CryptrError::Config("No config found - nothing to delete"));
-        }
-    };
+    let mut config = EncConfig::read()
+        .await
+        .map_err(|_| CryptrError::Config("No config found - nothing to delete"))?;
 
     if config.enc_keys.enc_keys.is_empty() {
         return Err(CryptrError::Config(
@@ -514,12 +494,9 @@ pub async fn set_active() -> Result<(), CryptrError> {
 }
 
 pub async fn s3_show() -> Result<(), CryptrError> {
-    let config = match EncConfig::read().await {
-        Ok(config) => config,
-        Err(_) => {
-            return Err(CryptrError::Keys("No config found"));
-        }
-    };
+    let config = EncConfig::read()
+        .await
+        .map_err(|_| CryptrError::Keys("No config found"))?;
 
     println!("{}", config.s3_config);
     config.save().await?;
@@ -547,10 +524,9 @@ pub async fn s3_update() -> Result<(), CryptrError> {
         if Url::try_from(trimmed).is_ok() {
             config.s3_config.url = trimmed.to_string();
             break;
-        } else {
-            let msg = "You must provide a valid URL!\n".red();
-            eprintln!("{msg}");
         }
+        let msg = "You must provide a valid URL!\n".red();
+        eprintln!("{msg}");
     }
 
     // use path style
@@ -613,12 +589,9 @@ pub async fn s3_update() -> Result<(), CryptrError> {
 }
 
 pub async fn s3_list(args: ArgsS3List) -> Result<(), CryptrError> {
-    let config = match EncConfig::read().await {
-        Ok(config) => config,
-        Err(_) => {
-            return Err(CryptrError::Config("No config found"));
-        }
-    };
+    let config = EncConfig::read()
+        .await
+        .map_err(|_| CryptrError::Config("No config found"))?;
 
     let bucket = config.s3_config.bucket(args.bucket)?;
     let res = bucket.list("", None).await?;

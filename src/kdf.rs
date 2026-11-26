@@ -17,6 +17,11 @@ impl KdfValue {
     /// CAUTION: Do NOT use this for normal password hashing!
     /// The result of hashing will always be same!
     /// This is only intended for generating enc keys, which must be always the same!
+    ///
+    /// # Panics
+    /// Panics when argon2 rejects the parameters this crate ships, which cannot happen
+    /// for the `M_COST`, `T_COST` and `P_COST` constants above.
+    #[must_use]
     pub fn new(password: &str) -> Self {
         let params = Params::new(M_COST, T_COST, P_COST, Some(OUTPUT_LEN)).unwrap();
         Self::new_with_params(password, params)
@@ -25,6 +30,11 @@ impl KdfValue {
     /// CAUTION: Do NOT use this for normal password hashing!
     /// The result of hashing will always be same!
     /// This is only intended for generating enc keys, which must be always the same!
+    ///
+    /// # Panics
+    /// Panics when argon2 rejects `params` for the fixed 32 byte output, which
+    /// happens for parameters that are too small for the argon2id version used.
+    #[must_use]
     pub fn new_with_params(password: &str, params: Params) -> Self {
         let m_cost = params.m_cost();
         let t_cost = params.t_cost();
@@ -44,11 +54,17 @@ impl KdfValue {
         }
     }
 
-    /// Returns the correct enc key value for the EncKeyHeader
+    /// Returns the correct enc key value for the `EncKeyHeader`
+    #[must_use]
     pub fn enc_key_value(&self) -> String {
         format!("password${}${}${}", self.m_cost, self.t_cost, self.p_cost)
     }
 
+    /// Parses an enc key id back into its argon2 params, `None` for a malformed id
+    ///
+    /// Params above the generation constants are rejected: they are attacker
+    /// controlled and would build a resource exhaustion payload.
+    #[must_use]
     pub fn try_enc_key_to_params(enc_key_id: &str) -> Option<Params> {
         let (_, values) = enc_key_id.split_once("password$")?;
         let mut split = values.split('$');
@@ -70,6 +86,7 @@ impl KdfValue {
     }
 
     /// Returns the result of the inner hash value.
+    #[must_use]
     pub fn value(self) -> Vec<u8> {
         self.value
     }

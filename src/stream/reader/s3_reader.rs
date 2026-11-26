@@ -1,6 +1,6 @@
 use crate::CryptrError;
 use crate::encryption::ChunkSizeKb;
-use crate::stream::{EncStreamReader, LastStreamElement, StreamChunk};
+use crate::stream::{EncStreamReader, LastStreamElement, StreamChunk, size_units};
 use crate::value::EncValueHeader;
 use async_trait::async_trait;
 use bytes::BytesMut;
@@ -44,14 +44,15 @@ impl EncStreamReader for S3Reader<'_> {
     ) -> Result<JoinHandle<Result<(), CryptrError>>, CryptrError> {
         // get the content length of the remote object first
         let head = self.bucket.head(self.object).await?;
-        let content_length = head
-            .content_length
-            .map(|c| c as usize)
-            .unwrap_or(usize::MAX);
+        let content_length = match head.content_length {
+            Some(len) => usize::try_from(len).map_err(|_| {
+                CryptrError::S3("object size exceeds the address space of this target".to_string())
+            })?,
+            None => usize::MAX,
+        };
 
         // progress printer
-        let tx_progress =
-            Self::spawn_progress(self.print_progress, self.object, content_length).await;
+        let tx_progress = Self::spawn_progress(self.print_progress, self.object, content_length);
 
         // now get the object itself
         let resp = self.bucket.get(self.object).await?;
@@ -138,14 +139,15 @@ impl EncStreamReader for S3Reader<'_> {
     ) -> Result<JoinHandle<Result<(), CryptrError>>, CryptrError> {
         // get the content length of the remote object first
         let head = self.bucket.head(self.object).await?;
-        let content_length = head
-            .content_length
-            .map(|c| c as usize)
-            .unwrap_or(usize::MAX);
+        let content_length = match head.content_length {
+            Some(len) => usize::try_from(len).map_err(|_| {
+                CryptrError::S3("object size exceeds the address space of this target".to_string())
+            })?,
+            None => usize::MAX,
+        };
 
         // progress printer
-        let tx_progress =
-            Self::spawn_progress(self.print_progress, self.object, content_length).await;
+        let tx_progress = Self::spawn_progress(self.print_progress, self.object, content_length);
 
         // now get the object itself
         let resp = self.bucket.get(self.object).await?;
@@ -297,7 +299,7 @@ impl EncStreamReader for S3Reader<'_> {
 }
 
 impl S3Reader<'_> {
-    async fn spawn_progress(
+    fn spawn_progress(
         print_progress: bool,
         object: &str,
         content_length: usize,
@@ -306,14 +308,15 @@ impl S3Reader<'_> {
         if print_progress {
             let object = object.to_string();
             tokio::spawn(async move {
-                let (div, unit) = if content_length > 1024 * 1024 * 10 {
-                    ((1024 * 1024) as f64, "MiB")
-                } else if content_length > 1024 * 10 {
-                    ((1024 * 10) as f64, "KiB")
+                let total = content_length as u64;
+                let (div, unit) = if total > 1024 * 1024 * 10 {
+                    (1024u64 * 1024, "MiB")
+                } else if total > 1024 * 10 {
+                    (1024u64 * 10, "KiB")
                 } else {
-                    (1f64, "Bytes")
+                    (1u64, "Bytes")
                 };
-                let target = content_length as f64 / div;
+                let (t_whole, t_frac) = size_units(total, div);
                 let start = Instant::now();
 
                 let mut interval = time::interval(Duration::from_secs(5));
@@ -321,13 +324,16 @@ impl S3Reader<'_> {
 
                 loop {
                     interval.tick().await;
-                    let progress = *rx_progess.borrow() as f64 / div;
-                    let rate = progress / start.elapsed().as_secs() as f64;
+                    let done = *rx_progess.borrow() as u64;
+                    let (p_whole, p_frac) = size_units(done, div);
+                    // the first tick lands on second 0, which must not divide
+                    let (r_whole, r_frac) =
+                        size_units(done / start.elapsed().as_secs().max(1), div);
                     println!(
-                        "S3Reader ({object}) {progress:.02} / {target:.02} {unit} \
-                        -> {rate:.02} {unit}/s"
+                        "S3Reader ({object}) {p_whole}.{p_frac:02} / \
+                        {t_whole}.{t_frac:02} {unit} -> {r_whole}.{r_frac:02} {unit}/s"
                     );
-                    if progress >= target {
+                    if done >= total {
                         break;
                     }
                 }

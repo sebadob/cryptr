@@ -38,7 +38,7 @@ impl EncStreamReader for MemoryReader {
         if chunk_size > value_len {
             debug!("ChunkSize is smaller than the whole value size, reducing it to match exactly");
             chunk_size = value_len;
-        };
+        }
 
         // An empty input produces exactly one empty last chunk (and avoids a divide-by-zero)
         let chunks_total = match value_len.checked_div(chunk_size) {

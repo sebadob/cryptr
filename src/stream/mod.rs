@@ -34,6 +34,7 @@ impl AsRef<[u8]> for StreamChunk {
 }
 
 impl StreamChunk {
+    #[must_use]
     pub fn new(data: Vec<u8>) -> Self {
         Self(data)
     }
@@ -42,6 +43,9 @@ impl StreamChunk {
 #[async_trait]
 pub trait EncStreamReader {
     /// Debug output for this reader
+    ///
+    /// # Errors
+    /// `std::fmt::Error` when the formatter fails to write.
     fn debug_reader(&self, f: &mut Formatter<'_>) -> std::fmt::Result;
 
     /// This must spawn the reader into the async context and then return.
@@ -57,7 +61,7 @@ pub trait EncStreamReader {
     /// This must spawn the reader into the async context and then return.
     /// The reason is, that you are way more flexible optimizing with lifetimes and such.
     ///
-    /// The very first value being sent must(!) be the EncValueHeader extracted from the
+    /// The very first value being sent must(!) be the `EncValueHeader` extracted from the
     /// encrypted source file. You will get the chunk size from the extracted header.
     ///
     /// This function is being used for decrypting files.
@@ -71,6 +75,9 @@ pub trait EncStreamReader {
 #[async_trait]
 pub trait EncStreamWriter {
     /// Debug output for this writer
+    ///
+    /// # Errors
+    /// `std::fmt::Error` when the formatter fails to write.
     fn debug_writer(&self, f: &mut Formatter<'_>) -> std::fmt::Result;
 
     async fn write(
@@ -89,4 +96,13 @@ impl Debug for dyn EncStreamWriter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.debug_writer(f)
     }
+}
+
+/// Splits a byte count into whole `div` units plus a two digit fraction
+///
+/// Integer math only: a progress line never needs the 52 bit mantissa of an `f64`,
+/// and files above 2^53 bytes must keep their exact byte count.
+#[inline]
+pub(crate) fn size_units(bytes: u64, div: u64) -> (u64, u64) {
+    (bytes / div, (bytes % div) * 100 / div)
 }

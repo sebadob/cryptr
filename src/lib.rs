@@ -8,16 +8,14 @@
 cfg_select! {
     all(feature = "aws_lc_rs", feature = "ring") => {
         compile_error!(
-            "features `aws_lc_rs` and `ring` are mutually exclusive,",
-            "pick exactly one rustls crypto backend"
+            "features `aws_lc_rs` and `ring` are mutually exclusive, pick exactly one rustls crypto backend"
         );
     }
     not(any(feature = "aws_lc_rs", feature = "ring")) => {
         cfg_select! {
             any(feature = "s3", feature = "streaming") => {
                 compile_error!(
-                    "features `s3` and `streaming` need a rustls crypto backend,",
-                    "enable exactly one of `aws_lc_rs` or `ring`"
+                    "features `s3` and `streaming` need a rustls crypto backend, enable exactly one of `aws_lc_rs` or `ring`"
                 );
             }
             _ => {}
@@ -85,19 +83,20 @@ pub enum CryptrError {
 
 impl CryptrError {
     #[allow(dead_code)]
+    #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
-            CryptrError::Cli(err) => err.as_str(),
-            CryptrError::Config(err) => err,
-            CryptrError::Decryption(err) => err,
-            CryptrError::Deserialization(err) => err,
-            CryptrError::Encryption(err) => err,
-            CryptrError::File(err) => err,
-            CryptrError::Generic(err) => err.as_str(),
-            CryptrError::HeaderInvalid(err) => err,
-            CryptrError::Keys(err) => err,
-            CryptrError::Password(err) => err,
-            CryptrError::S3(err) => err.as_str(),
+            CryptrError::Cli(err) | CryptrError::Generic(err) | CryptrError::S3(err) => {
+                err.as_str()
+            }
+            CryptrError::Config(err)
+            | CryptrError::Decryption(err)
+            | CryptrError::Deserialization(err)
+            | CryptrError::Encryption(err)
+            | CryptrError::File(err)
+            | CryptrError::HeaderInvalid(err)
+            | CryptrError::Keys(err)
+            | CryptrError::Password(err) => err,
         }
     }
 }

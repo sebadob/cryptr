@@ -34,6 +34,7 @@ pub type ChannelSender = futures::channel::mpsc::Sender<Result<Vec<u8>, CryptrEr
 pub struct ChannelReader(futures::channel::mpsc::Receiver<Result<Vec<u8>, CryptrError>>);
 
 impl ChannelReader {
+    #[must_use]
     pub fn new() -> (Self, ChannelSender) {
         let (tx, rx) = futures::channel::mpsc::channel(CHANNELS);
         (Self(rx), tx)

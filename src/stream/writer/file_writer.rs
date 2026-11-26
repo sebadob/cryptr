@@ -5,7 +5,7 @@ use flume::Receiver;
 use std::fmt::Formatter;
 use tracing::debug;
 
-/// Streaming FileWriter
+/// Streaming `FileWriter`
 ///
 /// Available with feature `streaming` only
 #[derive(Debug)]

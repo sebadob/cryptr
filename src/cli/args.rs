@@ -19,15 +19,15 @@ pub enum Args {
 #[derive(Debug, Parser)]
 pub struct ArgsEncryptDecrypt {
     /// The source - format:
-    /// File         -> file:/path/to/your/file
-    /// S3           -> s3:/bucket_name/object_name
+    /// File         -> <file:/path/to/your/file>
+    /// S3           -> <s3:/bucket_name/object_name>
     /// Shell Input  -> leave empty
     #[arg(short, long, verbatim_doc_comment)]
     pub from: Option<String>,
 
     /// The target - format:
-    /// File         -> file:/path/to/your/file
-    /// S3           -> s3:/bucket_name/object_name
+    /// File         -> <file:/path/to/your/file>
+    /// S3           -> <s3:/bucket_name/object_name>
     /// Shell Output -> leave empty
     #[arg(short, long, verbatim_doc_comment)]
     pub to: Option<String>,
@@ -53,11 +53,11 @@ pub struct ArgsEncryptDecrypt {
 
 impl ArgsEncryptDecrypt {
     pub fn from_to_fmt() -> String {
-        r#"Format:
+        r"Format:
 File         -> file:/path/to/your/file
 S3           -> s3:bucket_name/object_name
 Shell Input  -> leave empty
-"#
+"
         .to_string()
     }
 }

@@ -102,12 +102,13 @@ pub struct EncValueHeader {
     pub version: EncVersion,
     pub alg: EncAlg,
     pub length: u16,
-    /// chunk_size in kB used for the encryption
+    /// `chunk_size` in kB used for the encryption
     pub chunk_size: ChunkSizeKb,
     pub enc_key_id: String,
 }
 
 impl EncValueHeader {
+    #[must_use]
     pub fn into_bytes(self) -> Bytes {
         // length + version + alg + chunk_size = 6 bytes
         let mut buf = BytesMut::with_capacity(6 + self.enc_key_id.len());
@@ -154,7 +155,7 @@ impl EncValueHeader {
     /// encryption from the given byte slice.
     ///
     /// # Returns
-    /// (EncValueHeader, Nonce, PayloadOffset)
+    /// (`EncValueHeader`, `Nonce`, `PayloadOffset`)
     #[cfg(feature = "streaming")]
     pub(crate) fn try_extract_with_nonce(buf: &[u8]) -> Result<(Self, Vec<u8>, u16), CryptrError> {
         let length_orig = buf.len();
@@ -181,7 +182,10 @@ impl EncValueHeader {
         let nonce = buf.split_to(nonce_size).to_vec();
         debug_assert_eq!(nonce.len(), nonce_size);
 
-        let offset = (length_orig - buf.len()) as u16;
+        // the offset is the header length plus the nonce, both bounded by the u16 header
+        // length field, so a value that does not fit means a corrupted header
+        let offset = u16::try_from(length_orig - buf.len())
+            .map_err(|_| CryptrError::HeaderInvalid("Header length exceeds the u16 maximum"))?;
 
         Ok((header, nonce, offset))
     }
@@ -206,10 +210,14 @@ impl EncValueHeader {
         }
         let chunk_size = chunk_size.unwrap_or(ChunkSizeKb::try_from(0)?);
 
+        // the bound check above guarantees this fits, the header length field is u16
+        let length = u16::try_from(6 + id_len)
+            .map_err(|_| CryptrError::Encryption("EncKey ID too long (maximum 65,529 bytes)"))?;
+
         Ok(Self {
             version: EncVersion::V1,
             alg: EncAlg::ChaCha20Poly1305,
-            length: (6 + id_len) as u16,
+            length,
             chunk_size,
             enc_key_id,
         })
@@ -239,9 +247,13 @@ impl TryFrom<Vec<u8>> for EncValue {
 impl EncValue {
     /// Encrypt a value with the statically initialized encryption keys
     ///
+    /// # Errors
+    /// `CryptrError::Keys` when the active key ID has no key, `CryptrError::Encryption`
+    /// when the encryption fails.
+    ///
     /// # Panics
     ///
-    /// If `init()` has not been called on valid EncKeys once before
+    /// If `init()` has not been called on valid `EncKeys` once before
     pub fn encrypt(value: &[u8]) -> Result<Self, CryptrError> {
         let enc_key_id = EncKeys::get_static().enc_key_active.clone();
         let header = EncValueHeader::from_enc_key_id(enc_key_id, None)?;
@@ -252,6 +264,9 @@ impl EncValue {
     }
 
     /// Encrypt a value with a given password
+    ///
+    /// # Errors
+    /// `CryptrError::Encryption` when the encryption fails.
     pub fn encrypt_with_password(value: &[u8], password: &str) -> Result<Self, CryptrError> {
         let kdf_value = KdfValue::new(password);
         let enc_key_id = kdf_value.enc_key_value();
@@ -264,9 +279,13 @@ impl EncValue {
 
     /// Encrypt a value with the statically initialized encryption keys into a file
     ///
+    /// # Errors
+    /// `CryptrError::Keys` when the active key ID has no key, `CryptrError::Encryption`
+    /// when the encryption fails, `CryptrError::File` when the file cannot be written.
+    ///
     /// # Panics
     ///
-    /// If `init()` has not been called on valid EncKeys once before
+    /// If `init()` has not been called on valid `EncKeys` once before
     pub async fn encrypt_to_file(value: &[u8], path: &str) -> Result<(), CryptrError> {
         let enc_key_id = EncKeys::get_static().enc_key_active.clone();
         let header = EncValueHeader::from_enc_key_id(enc_key_id, None)?;
@@ -280,6 +299,10 @@ impl EncValue {
     }
 
     /// Encrypt a value with a given password into a file
+    ///
+    /// # Errors
+    /// `CryptrError::Encryption` when the encryption fails, `CryptrError::File` when the
+    /// file cannot be written.
     pub async fn encrypt_to_file_with_password(
         value: &[u8],
         path: &str,
@@ -298,6 +321,10 @@ impl EncValue {
     /// Encrypt a value with the given encryption keys.
     ///
     /// It will by default always take the active keys.
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` when the active key ID has no key, `CryptrError::Encryption`
+    /// when the encryption fails.
     pub fn encrypt_with_keys(value: &[u8], enc_keys: &EncKeys) -> Result<Self, CryptrError> {
         let header = EncValueHeader::from_enc_key_id(enc_keys.enc_key_active.clone(), None)?;
         let key = enc_keys.get_key(&enc_keys.enc_key_active)?;
@@ -307,6 +334,10 @@ impl EncValue {
     }
 
     /// Encrypt a value with a specific Key ID from the statically initialized encryption keys
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` when the given key ID has no key, `CryptrError::Encryption`
+    /// when the encryption fails.
     pub fn encrypt_with_key_id(value: &[u8], enc_key_id: String) -> Result<Self, CryptrError> {
         let header = EncValueHeader::from_enc_key_id(enc_key_id, None)?;
         let key = EncKeys::get_static_key(&header.enc_key_id)?;
@@ -316,6 +347,13 @@ impl EncValue {
     }
 
     /// Decrypt a value with the statically initialized encryption keys
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` when the header key ID has no key, `CryptrError::Decryption`
+    /// when the payload does not decrypt.
+    ///
+    /// # Panics
+    /// If `init()` has not been called on valid `EncKeys` once before
     pub fn decrypt(mut self) -> Result<Bytes, CryptrError> {
         let key = EncKeys::get_static_key(&self.header.enc_key_id)?;
         encryption::decrypt(
@@ -327,6 +365,13 @@ impl EncValue {
     }
 
     /// Decrypt a given Bytes directly
+    ///
+    /// # Errors
+    /// `CryptrError::HeaderInvalid` for a malformed header, `CryptrError::Keys` when the
+    /// header key ID has no key, `CryptrError::Decryption` when the payload does not decrypt.
+    ///
+    /// # Panics
+    /// If `init()` has not been called on valid `EncKeys` once before
     pub fn decrypt_bytes(bytes: &mut Bytes) -> Result<Bytes, CryptrError> {
         let header = EncValueHeader::try_extract(bytes)?;
         let key = EncKeys::get_static_key(&header.enc_key_id)?;
@@ -335,6 +380,10 @@ impl EncValue {
     }
 
     /// Decrypt a value using the given encryption keys
+    ///
+    /// # Errors
+    /// `CryptrError::Keys` when the header key ID has no key, `CryptrError::Decryption`
+    /// when the payload does not decrypt.
     pub fn decrypt_with_keys(mut self, enc_keys: &EncKeys) -> Result<Bytes, CryptrError> {
         let key = enc_keys.get_key(&self.header.enc_key_id)?;
         encryption::decrypt(
@@ -346,6 +395,10 @@ impl EncValue {
     }
 
     /// Decrypt a given Bytes directly with given keys
+    ///
+    /// # Errors
+    /// `CryptrError::HeaderInvalid` for a malformed header, `CryptrError::Keys` when the
+    /// header key ID has no key, `CryptrError::Decryption` when the payload does not decrypt.
     pub fn decrypt_bytes_with_keys(
         bytes: &mut Bytes,
         enc_keys: &EncKeys,
@@ -357,6 +410,10 @@ impl EncValue {
     }
 
     /// Decrypt a value with a given password
+    ///
+    /// # Errors
+    /// `CryptrError::Password` when the header key ID is not a password-derived key,
+    /// `CryptrError::Decryption` when the payload does not decrypt.
     pub fn decrypt_with_password(mut self, password: &str) -> Result<Bytes, CryptrError> {
         let params = KdfValue::try_enc_key_to_params(&self.header.enc_key_id).ok_or(
             CryptrError::Password("EncKey ID is not a password-derived key"),
@@ -372,6 +429,11 @@ impl EncValue {
     }
 
     /// Decrypt a given Bytes directly with given password
+    ///
+    /// # Errors
+    /// `CryptrError::HeaderInvalid` for a malformed header, `CryptrError::Password` when
+    /// the header key ID is not a password-derived key, `CryptrError::Decryption` when the
+    /// payload does not decrypt.
     pub fn decrypt_bytes_with_password(
         bytes: &mut Bytes,
         password: &str,
@@ -387,6 +449,10 @@ impl EncValue {
     }
 
     /// Try to build from raw encrypted bytes
+    ///
+    /// # Errors
+    /// `CryptrError::HeaderInvalid` for a malformed header, `CryptrError::Deserialization`
+    /// when the header is shorter than its own length field.
     pub fn try_from_bytes(bytes: Vec<u8>) -> Result<Self, CryptrError> {
         let mut buf = Bytes::from(bytes);
         let header = EncValueHeader::try_extract(&mut buf)?;
@@ -398,6 +464,10 @@ impl EncValue {
     }
 
     /// Try to build from a raw encrypted file
+    ///
+    /// # Errors
+    /// `CryptrError::File` when the file cannot be read, and the header errors of
+    /// [`Self::try_from_bytes`].
     pub async fn try_from_file(path: &str) -> Result<Self, CryptrError> {
         let content = fs::read(path).await?;
         Self::try_from_bytes(content)
@@ -418,9 +488,12 @@ impl EncValue {
 impl EncValue {
     /// Streaming encryption with the statically initialized encryption keys
     ///
+    /// # Errors
+    /// The errors of [`Self::encrypt_stream_with_key_id`].
+    ///
     /// # Panics
     ///
-    /// If `init()` has not been called on valid EncKeys once before
+    /// If `init()` has not been called on valid `EncKeys` once before
     #[tracing::instrument]
     pub async fn encrypt_stream(
         reader: StreamReader<'_>,
@@ -432,9 +505,12 @@ impl EncValue {
 
     /// Streaming encryption with the statically initialized encryption keys and custom chunk size
     ///
+    /// # Errors
+    /// The errors of [`Self::encrypt_stream_with_chunk_size_and_key_id`].
+    ///
     /// # Panics
     ///
-    /// If `init()` has not been called on valid EncKeys once before
+    /// If `init()` has not been called on valid `EncKeys` once before
     #[tracing::instrument]
     pub async fn encrypt_stream_with_chunk_size(
         reader: StreamReader<'_>,
@@ -447,6 +523,9 @@ impl EncValue {
     }
 
     /// Streaming encryption with a specific Key ID from the statically initialized encryption keys
+    ///
+    /// # Errors
+    /// The errors of [`Self::encrypt_stream_with_chunk_size_and_key_id`].
     #[tracing::instrument]
     pub async fn encrypt_stream_with_key_id(
         reader: StreamReader<'_>,
@@ -463,6 +542,9 @@ impl EncValue {
     }
 
     /// Streaming encryption with a dynamic key ID and key
+    ///
+    /// # Errors
+    /// The errors of [`Self::encrypt_stream_with_chunk_size_and_key`].
     #[tracing::instrument]
     pub async fn encrypt_stream_with_key(
         reader: StreamReader<'_>,
@@ -481,6 +563,9 @@ impl EncValue {
     }
 
     /// Streaming encryption with password
+    ///
+    /// # Errors
+    /// The errors of [`Self::encrypt_stream_with_chunk_size_and_password`].
     #[tracing::instrument]
     pub async fn encrypt_stream_with_password(
         reader: StreamReader<'_>,
@@ -498,6 +583,14 @@ impl EncValue {
 
     /// Streaming encryption with a specific Key ID from the statically initialized encryption keys
     /// and custom chunk size
+    ///
+    /// # Errors
+    /// `CryptrError::Encryption` for an invalid key ID length, `CryptrError::Keys` when the
+    /// key ID has no key, `CryptrError::Generic` when the key is not 32 bytes, and the
+    /// reader / writer errors of the streaming run.
+    ///
+    /// # Panics
+    /// If `init()` has not been called on valid `EncKeys` once before
     #[tracing::instrument]
     pub async fn encrypt_stream_with_chunk_size_and_key_id(
         reader: StreamReader<'_>,
@@ -513,6 +606,10 @@ impl EncValue {
     }
 
     /// Streaming encryption with a dynamic key ID, key and custom chunk size
+    ///
+    /// # Errors
+    /// `CryptrError::Encryption` for an invalid key ID length, `CryptrError::Generic` when
+    /// the key is not 32 bytes, and the reader / writer errors of the streaming run.
     #[tracing::instrument]
     pub async fn encrypt_stream_with_chunk_size_and_key(
         reader: StreamReader<'_>,
@@ -531,6 +628,10 @@ impl EncValue {
     }
 
     /// Streaming encryption with password and custom chunk size
+    ///
+    /// # Errors
+    /// `CryptrError::Encryption` for an invalid key ID length, `CryptrError::Generic` when
+    /// the derived key is not 32 bytes, and the reader / writer errors of the streaming run.
     #[tracing::instrument]
     pub async fn encrypt_stream_with_chunk_size_and_password(
         reader: StreamReader<'_>,
@@ -594,7 +695,7 @@ impl EncValue {
             StreamWriter::File(mut w) => w.write(rx_enc_from_stream).await?,
             #[cfg(feature = "s3")]
             StreamWriter::S3(mut w) => w.write(rx_enc_from_stream).await?,
-        };
+        }
 
         // the reader should always be finished before the writer
         reader_handle.await??;
@@ -603,6 +704,14 @@ impl EncValue {
     }
 
     /// Streaming decryption with the statically initialized encryption keys
+    ///
+    /// # Errors
+    /// `CryptrError::HeaderInvalid` for a malformed header, `CryptrError::Decryption` when
+    /// the stream was encrypted with a password and none was given, `CryptrError::Keys`
+    /// when the header key ID has no key, and the reader / writer errors of the run.
+    ///
+    /// # Panics
+    /// If `init()` has not been called on valid `EncKeys` once before
     #[tracing::instrument]
     pub async fn decrypt_stream(
         reader: StreamReader<'_>,
@@ -612,6 +721,11 @@ impl EncValue {
     }
 
     /// Streaming decryption with given dynamic encryption keys
+    ///
+    /// # Errors
+    /// `CryptrError::HeaderInvalid` for a malformed header, `CryptrError::Decryption` when
+    /// the stream was encrypted with a password and none was given, `CryptrError::Keys`
+    /// when the header key ID has no key, and the reader / writer errors of the run.
     #[tracing::instrument]
     pub async fn decrypt_stream_with_keys(
         reader: StreamReader<'_>,
@@ -622,6 +736,10 @@ impl EncValue {
     }
 
     /// Streaming decryption with given password
+    ///
+    /// # Errors
+    /// `CryptrError::HeaderInvalid` for a malformed header, `CryptrError::Decryption` when
+    /// the stream was not encrypted with a password, and the reader / writer errors of the run.
     #[tracing::instrument]
     pub async fn decrypt_stream_with_password(
         reader: StreamReader<'_>,
@@ -687,7 +805,7 @@ impl EncValue {
             StreamWriter::File(mut w) => w.write(rx_from_decryptor_to_writer).await?,
             #[cfg(feature = "s3")]
             StreamWriter::S3(mut w) => w.write(rx_from_decryptor_to_writer).await?,
-        };
+        }
 
         // the reader should always be finished before the writer
         reader_handle.await??;
@@ -1007,8 +1125,7 @@ mod tests {
 
             let err = EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size)
                 .await
-                .err()
-                .expect("expected an error");
+                .expect_err("expected an error");
             assert!(format!("{err}").contains("first-fetch error"));
         }
     }
@@ -1038,8 +1155,7 @@ mod tests {
 
         let err = EncValue::encrypt_stream_with_chunk_size(reader, writer, chunk_size)
             .await
-            .err()
-            .expect("expected an error");
+            .expect_err("expected an error");
         assert!(format!("{err}").contains("upstream mid-stream failure"));
 
         // the inner channel consumer must see the error before end-of-stream
@@ -1126,7 +1242,7 @@ mod tests {
         let _ = EncKeys::generate().unwrap().init();
         let chunk_size = ChunkSizeKb::try_from(1).unwrap();
 
-        let target = format!("test_files/test_mem_to_file_data_{}.enc", size);
+        let target = format!("test_files/test_mem_to_file_data_{size}.enc");
 
         // encrypt
         let reader = StreamReader::Memory(MemoryReader(data.clone()));
@@ -1182,9 +1298,9 @@ mod tests {
 
         let _ = fs::create_dir_all("test_files").await;
 
-        let plain = format!("test_files/test_data_{}", size);
-        let target = format!("test_files/test_data_{}.enc", size);
-        let plain_dec = format!("test_files/test_data_{}.dec", size);
+        let plain = format!("test_files/test_data_{size}");
+        let target = format!("test_files/test_data_{size}.enc");
+        let plain_dec = format!("test_files/test_data_{size}.dec");
 
         // create and write some test data
         fs::write(&plain, data).await.unwrap();
@@ -1233,15 +1349,15 @@ mod tests {
     // #[case(secure_random_vec(17 * 1024 * 1024).unwrap(), "17mib")]
     // #[case(secure_random_vec(39 * 1024 * 1024).unwrap(), "39mib")]
     #[tokio::test]
-    #[ignore]
+    #[ignore = "Needs a running S3 instance, see TESTING.md"]
     async fn test_file_to_s3_to_file(#[case] data: Vec<u8>, #[case] size: &str) {
         dotenvy::dotenv().ok().unwrap();
         let _ = EncKeys::generate().unwrap().init();
 
         let _ = fs::create_dir_all("test_files").await;
-        let plain = format!("test_files/test_data_{}", size);
-        let target = format!("test_data_{}.cryptr", size);
-        let plain_dec = format!("test_files/test_data_{}.dec", size);
+        let plain = format!("test_files/test_data_{size}");
+        let target = format!("test_data_{size}.cryptr");
+        let plain_dec = format!("test_files/test_data_{size}.dec");
 
         // create and write some test data
         fs::write(&plain, data).await.unwrap();
