@@ -1,6 +1,6 @@
 # Changelog
 
-## UNRELEASED
+## v0.13.0
 
 `aws_lc_rs` and `ring` were added as new feature flags, with `aws_lc_rs` being the default. They
 let you choose the TLS backend. Enabling both, or enabling neither together with `s3` or
