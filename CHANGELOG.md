@@ -1,6 +1,6 @@
 # Changelog
 
-## UNRELEASED
+## v0.13.0
 
 `aws_lc_rs` and `ring` were added as new feature flags, with `aws_lc_rs` being the default. They
 let you choose the TLS backend. Enabling both, or enabling neither together with `s3` or
@@ -8,6 +8,8 @@ let you choose the TLS backend. Enabling both, or enabling neither together with
 
 Applications must call `cryptr::utils::install_crypto_provider()` once at startup, before the
 first S3 request. An application that installs its own provider keeps it and is unaffected.
+
+The MSRV was bumped to `1.95.0`.
 
 ## v0.12.0
 
