@@ -70,6 +70,22 @@ You can install the CLI via `cargo` for now:
 cargo install cryptr --features cli
 ```
 
+### TLS backend
+
+S3 streaming needs TLS, and you pick the crypto backend with exactly one feature: `aws_lc_rs`
+(the default) or `ring`. Enabling both, or enabling neither together with `s3` or `streaming`,
+is a compile error.
+
+```toml
+[dependencies]
+cryptr = { version = "0.12", default-features = false, features = ["cli", "ring"] }
+```
+
+Call [`utils::install_crypto_provider`] once at startup, before the first S3 request. Without an
+installed provider, TLS fails on the first S3 request. The call fails when a provider was
+already installed, and that provider is kept, so an embedding crate that picked its own backend
+is unaffected.
+
 ## Examples
 
 You can find usage examples for both the library and the CLI in

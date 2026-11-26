@@ -10,34 +10,70 @@ keywords = ["cli", "cryptography", "encryption", "utility", "security"]
 description = "simple encrypted (streaming) values"
 repository = "https://github.com/sebadob/cryptr"
 
+# [workspace.lints.clippy]
+# all = { level = "deny", priority = -1 }
+# pedantic = { level = "deny", priority = -1 }
+# # cargo = { level = "warn", priority = -1 }
+#
+# assert_is_empty = "allow"
+# case_sensitive_file_extension_comparisons = "allow"
+# cast_lossless = "allow"
+# cast_possible_truncation = "allow"
+# checked_conversions = "allow"
+# manual_assert = "allow"
+# redundant_closure_for_method_calls = "allow"
+# similar_names = "allow"
+# struct_field_names = "allow"
+# too_many_lines = "allow"
+# used_underscore_binding = "allow"
+
 [package.metadata.docs.rs]
-all-features = true
+no-default-features = true
+features = ["cli", "aws_lc_rs"]
 
 [features]
-default = []
+default = ["aws_lc_rs"]
 cli = [
-    "s3",
-    "streaming",
-    "dep:clap",
-    "dep:colored",
-    "dep:flume",
-    "dep:home",
-    "dep:rpassword",
-    "dep:tracing-subscriber",
+  "s3",
+  "streaming",
+  "dep:clap",
+  "dep:colored",
+  "dep:flume",
+  "dep:home",
+  "dep:rpassword",
+  "dep:tracing-subscriber",
 ]
 s3 = [
-    "streaming",
-    "dep:async-stream",
-    "dep:reqwest",
-    "dep:s3-simple",
-    "dep:tokio-util",
+  "streaming",
+  "dep:async-stream",
+  "dep:reqwest",
+  "dep:s3-simple",
+  "dep:tokio-util",
 ]
 streaming = [
-    "dep:aead-stream",
-    "dep:async-trait",
-    "dep:flume",
-    "dep:futures",
-    "dep:reqwest",
+  "dep:aead-stream",
+  "dep:async-trait",
+  "dep:flume",
+  "dep:futures",
+  "dep:reqwest",
+]
+
+# The rustls crypto backend. Exactly one of the two must be enabled whenever
+# `s3` or `streaming` is enabled, which is enforced by a `compile_error!`.
+#
+# reqwest only ships aws-lc-rs, so `ring` goes through its `rustls-no-provider`
+# feature and installs the provider at startup via `cryptr::utils::install_crypto_provider`.
+aws_lc_rs = [
+  "dep:rustls",
+  "rustls/aws_lc_rs",
+  "reqwest?/rustls",
+  "s3-simple?/rustls",
+]
+ring = [
+  "dep:rustls",
+  "rustls/ring",
+  "reqwest?/rustls-no-provider",
+  "s3-simple?/rustls-no-provider",
 ]
 
 [patch.crates-io]
@@ -49,7 +85,12 @@ bincode-next = "3"
 bytes = "1.11.1"
 dotenvy = "0.15.7"
 thiserror = "2"
-tokio = { version = "1.35.0", features = ["fs", "io-std", "macros", "rt-multi-thread"] }
+tokio = { version = "1.35.0", features = [
+  "fs",
+  "io-std",
+  "macros",
+  "rt-multi-thread",
+] }
 tracing = { version = "0.1.40", features = ["attributes"] }
 rand = { version = "0.10", features = [] }
 regex = "1.10.2"
@@ -61,14 +102,18 @@ clap = { version = "4.4.10", optional = true, features = ["derive"] }
 colored = { version = "3", optional = true }
 home = { version = "0.5.5", optional = true }
 rpassword = { version = "7.3.1", optional = true }
-tracing-subscriber = { version = "0.3.23", optional = true, features = ["env-filter", "tracing"] }
+tracing-subscriber = { version = "0.3.23", optional = true, features = [
+  "env-filter",
+  "tracing",
+] }
 
 # s3
 async-stream = { version = "0.3.5", optional = true }
 reqwest = { version = "0.13.4", optional = true, default-features = false, features = [
-    "json", "rustls", "stream"
+  "json",
+  "stream",
 ] }
-s3-simple = { version = "0.9.1", optional = true }
+s3-simple = { version = "0.9.1", optional = true, default-features = false }
 tokio-util = { version = "0.7.10", optional = true, features = ["io"] }
 
 # streaming
@@ -84,7 +129,16 @@ chacha20poly1305 = { version = "0.11", features = ["rand_core", "zeroize"] }
 # sharded-slab
 #lazy_static = "1.1.0"
 
+# The cfg is reqwest's own: cargo only unifies dependency features between
+# declarations that share the exact same target cfg, and cryptr must land on
+# reqwest's rustls node to install the provider it reads back at runtime.
+[target.'cfg(not(all(target_arch = "wasm32", any(target_os = "unknown", target_os = "none"))))'.dependencies]
+rustls = { version = "0.23", optional = true, default-features = false, features = [
+  "std",
+  "tls12",
+] }
+
 [dev-dependencies]
-cryptr = { path = ".", features = ["cli"] }
+cryptr = { path = ".", default-features = false, features = ["cli"] }
 rstest = "0.26"
 tokio-test = "0.4.3"

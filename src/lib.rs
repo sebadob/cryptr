@@ -2,6 +2,30 @@
 
 #![doc = include_str!("../README.md")]
 
+// Exactly one rustls crypto backend, and only when we actually need TLS. Both
+// features would give rustls two providers, and neither leaves `s3` /
+// `streaming` with a TLS stack that can connect at all.
+cfg_select! {
+    all(feature = "aws_lc_rs", feature = "ring") => {
+        compile_error!(
+            "features `aws_lc_rs` and `ring` are mutually exclusive,",
+            "pick exactly one rustls crypto backend"
+        );
+    }
+    not(any(feature = "aws_lc_rs", feature = "ring")) => {
+        cfg_select! {
+            any(feature = "s3", feature = "streaming") => {
+                compile_error!(
+                    "features `s3` and `streaming` need a rustls crypto backend,",
+                    "enable exactly one of `aws_lc_rs` or `ring`"
+                );
+            }
+            _ => {}
+        }
+    }
+    _ => {}
+}
+
 use base64::DecodeError;
 pub use encryption::ChunkSizeKb;
 pub use keys::EncKeys;

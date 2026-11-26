@@ -1,9 +1,19 @@
 # Changelog
 
+## UNRELEASED
+
+`aws_lc_rs` and `ring` were added as new feature flags, with `aws_lc_rs` being the default. They
+let you choose the TLS backend. Enabling both, or enabling neither together with `s3` or
+`streaming`, is a compile error.
+
+Applications must call `cryptr::utils::install_crypto_provider()` once at startup, before the
+first S3 request. An application that installs its own provider keeps it and is unaffected.
+
 ## v0.12.0
 
-This version brings lots of tiny fixes and improvements for stability and security. There was nothing major, just
-robustness improvements in general and some preventions against a possibly hostile S3 host.
+This version brings lots of tiny fixes and improvements for stability and security. There was
+nothing major, just robustness improvements in general and some preventions against a possibly
+hostile S3 host.
 
 MSRV was bumped to v1.90.
 
@@ -11,8 +21,8 @@ MSRV was bumped to v1.90.
 
 - Rust edition bumped internally to 2024.
 - Several dependencies have been bumped.
-- This version removes the pre-built binaries from the repo, as they make little sense here. They were added in the very
-  early stages for testing and ease of use.
+- This version removes the pre-built binaries from the repo, as they make little sense here. They
+  were added in the very early stages for testing and ease of use.
 
 ## v0.10.0
 
@@ -24,49 +34,49 @@ Bump of external dependencies.
 
 ## v0.8.0
 
-Bumps the `s3-simple` dependency and adds `:` as an allowed character to the `EncKeyId` validation regex.
+Bumps the `s3-simple` dependency and adds `:` as an allowed character to the `EncKeyId` validation
+regex.
 
 ## v0.7.0
 
-This version brings a new `ChannelReader` and `ChannelWriter`. These can be used for working with streaming values
-in-memory, for instance when you want to download a `cryptr` file from S3, receive the data in-memory, apply conversions
-and then maybe return it as an async HTTP response.
+This version brings a new `ChannelReader` and `ChannelWriter`. These can be used for working with
+streaming values in-memory, for instance when you want to download a `cryptr` file from S3, receive
+the data in-memory, apply conversions and then maybe return it as an async HTTP response.
 
-The `ChannelReader` does NOT implement a decryption logic, because it does not make much sense. If you want to decrypt
-in-memory values, just stick to the already existing `MemoryReader`.
+The `ChannelReader` does NOT implement a decryption logic, because it does not make much sense. If
+you want to decrypt in-memory values, just stick to the already existing `MemoryReader`.
 
-This release also fixes a bug for the CLI, which could throw an unexpected error during `keys new-random` when the
-config dir does not exist yet.
+This release also fixes a bug for the CLI, which could throw an unexpected error during
+`keys new-random` when the config dir does not exist yet.
 
 ## v0.6.2
 
-Fixes a bug in `KdfValue::new_with_params()`, which ignored `m_cost`, `t_cost`, `p_cost` from the params and used the
-defaults all the time.
+Fixes a bug in `KdfValue::new_with_params()`, which ignored `m_cost`, `t_cost`, `p_cost` from the
+params and used the defaults all the time.
 
 ## v0.6.1
 
-2 new helper functions for `EncKeys` have been added, which provide more flexibility when they are handled manually or
-converted between formats:
+2 new helper functions for `EncKeys` have been added, which provide more flexibility when they are
+handled manually or converted between formats:
 
 - `EncKeys::try_parse()`
 - `EncKeys::keys_as_v64_vec()`
 
 ## v0.6.0
 
-All dependencies have been bumped to the latest versions to fix some security advisories for `ring` and `tokio`. The
-MSRV has been bumped to `1.85.1`.
+All dependencies have been bumped to the latest versions to fix some security advisories for `ring`
+and `tokio`. The MSRV has been bumped to `1.85.1`.
 
 ## v0.5.1
 
-Adds pub re-exports of the `s3-simple` API with `s3` feature enabled. This is now reachable via `cryptr::stream::s3::*`
-to be able to create
-`s3` readers and writers again.
+Adds pub re-exports of the `s3-simple` API with `s3` feature enabled. This is now reachable via
+`cryptr::stream::s3::*` to be able to create `s3` readers and writers again.
 
 ## v0.5.0
 
-A migration from `rusty_s3` to `s3-simple` for S3 requests has been done. This brings additional compatibility with for
-instance [Garage](https://garagehq.deuxfleurs.fr/)
-and gets rid of pre-signed URLs in favor of signed headers, which is a more secure approach.
+A migration from `rusty_s3` to `s3-simple` for S3 requests has been done. This brings additional
+compatibility with for instance [Garage](https://garagehq.deuxfleurs.fr/) and gets rid of pre-signed
+URLs in favor of signed headers, which is a more secure approach.
 
 ## v0.4.0
 
@@ -75,15 +85,16 @@ and gets rid of pre-signed URLs in favor of signed headers, which is a more secu
 
 ## v0.3.0
 
-- fix an offset bug in the `S3Reader` which would cause an in-flight decryption to fail on the last chunk
+- fix an offset bug in the `S3Reader` which would cause an in-flight decryption to fail on the last
+  chunk
 - optimized the performance of the `S3Reader`
 - cleaner error logging when using the CLI
 - bump external dependencies
 
 ## v0.2.2
 
-Make it compile on Windows systems with `cli` or `streaming` features. The before implementation for reading the
-filesize in `FileReader` was unix specific.
+Make it compile on Windows systems with `cli` or `streaming` features. The before implementation for
+reading the filesize in `FileReader` was unix specific.
 
 ## v0.2.1
 
