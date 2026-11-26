@@ -2,7 +2,7 @@
 name = "cryptr"
 version = "0.13.0"
 edition = "2024"
-rust-version = "1.90"
+rust-version = "1.95"
 license = "Apache-2.0"
 authors = ["Sebastian Dobe <sebastiandobe@mailbox.org"]
 categories = ["command-line-utilities", "cryptography", "data-structures"]
